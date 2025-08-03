@@ -418,30 +418,6 @@ In this example:
 
 By following this pattern, you can easily extend the search index with your own custom data.
 
-### Azure Search Indexing
-
-This folder contains the Azure Search indexing implementation.
-
-- **AzureVectorIndexingConverter.cs:** This class is responsible for converting content to vectors for hybrid search.
-- **AzureIndexManager.cs:** This class manages the Azure Search index, including creating, updating, and deleting the index.
-- **IAzureIndexManager.cs:** This is the interface for the `AzureIndexManager`.
-- **AzureIndexRebuilder.cs:** This class is a decorator for the `IIndexRebuilder` that ensures the Azure Search index is rebuilt when the Umbraco index is rebuilt.
-- **AzureIndexService.cs:** This class implements the `IIndexService` interface and is responsible for indexing documents in the Azure Search index.
-
-### Lucene Indexing
-
-This folder contains the Lucene indexing implementation.
-
-- **LuceneIndexingComposer.cs:** This class is responsible for configuring the external index with the custom options.
-- **ConfigureExternalIndexOptions.cs:** This class configures the external index with custom field definitions and value type factories, especially for facets.
-- **LuceneIndexService.cs:** This class implements the `IIndexService` interface and is responsible for indexing documents.
-
-#### Facets
-
-- **LucenePipeAnalyzer.cs:** This class defines a custom analyzer for Lucene that uses a pipe tokenizer.
-- **LuceneFacetsConfigurationProvider.cs:** This class provides the configuration for Lucene facets.
-- **LuceneFacetFullTextType.cs:** This class defines a custom field type for facet full-text search.
-
 ## Models
 
 ### Facet Models
@@ -513,31 +489,3 @@ In this example:
 - The `GetSupplierName()` method demonstrates how you can use `ValueFor` to fetch a field's value even if it's not a direct property on the model.
 
 This approach provides flexibility, allowing you to define strongly-typed properties for frequently accessed fields while retaining the ability to dynamically retrieve any indexed field using its `IndexFieldDefinition`.
-
-### Search Settings Models
-
-This folder contains the models for search settings.
-
-- **ExtraBoostingOption.cs:** This class represents an option to boost the score of a document based on a field value.
-- **FieldBasedSearchOrdering.cs:** This class represents an option to order search results by a field.
-- **FilteringBehavior.cs:** This enum represents the behavior of a filter (And, Or, Not).
-- **FullTextSearch.cs:** This class represents a full-text search query.
-- **SearchFilter.cs:** This class represents a filter to be applied to a search query.
-- **SearchParameters.cs:** This class represents the parameters for a search query.
-
-## Services
-
-### Azure Search Service
-
-This folder contains the Azure Search service implementation.
-
-- **AzureSearchService.cs:** This class implements the `ISearchService` interface and is responsible for searching for documents in the Azure Search index.
-- **SearchOptionsExtensions.cs:** This class contains a set of extension methods for the `SearchOptions` class. These methods provide a way to filter, sort, and add facets to search results.
-- **AzureSearchSettings.cs:** This class contains the settings for the Azure Search service.
-
-### Lucene Search Service
-
-This folder contains the Lucene search service implementation.
-
-- **LuceneSearchService.cs:** This class implements the `ISearchService` interface and is responsible for searching for documents in the Lucene index. It uses the `Examine` library to perform the search.
-- **ExamineExtensions.cs:** This class contains a set of extension methods for the `Examine` library. These methods provide a way to filter, sort, and boost search results.
