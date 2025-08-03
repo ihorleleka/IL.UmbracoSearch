@@ -489,3 +489,46 @@ In this example:
 - The `GetSupplierName()` method demonstrates how you can use `ValueFor` to fetch a field's value even if it's not a direct property on the model.
 
 This approach provides flexibility, allowing you to define strongly-typed properties for frequently accessed fields while retaining the ability to dynamically retrieve any indexed field using its `IndexFieldDefinition`.
+
+#### Library defined indexing constants
+
+Feel free to reuse
+
+```csharp
+public static class IndexingConstants
+{
+    public const string VectorSearchProfileName = "vector-profile";
+    public const string VectorSearchAlgorithmConfigurationName = "hnsw-1";
+    public const int VectorSearchDimension = 1536;
+    
+    public static class ComputedIndexFields
+    {
+        public const string ComputedFieldNameCommonPrefix = "computed";
+
+        public static readonly IndexFieldDefinition UmbracoNodeId = new(new SearchableField("id") { IsKey = true });
+        public static readonly IndexFieldDefinition<int> UmbracoNodeIdInt = new FieldDefinition("intid", FieldDefinitionTypes.Integer);
+        public static readonly IndexFieldDefinition UmbracoNodeName = "nodeName";
+
+        //cases like bool are not directly supported by lucene, so we have to define definition separately
+        public static readonly IndexFieldDefinition<bool> ExcludedFromSearch = IndexFieldDefinitionFactory.ForBool($"{ComputedFieldNameCommonPrefix}{nameof(ExcludedFromSearch)}");
+
+        //Implicit conversion will set the field name to the one specified, and a field type will be set to the FullText
+        public static readonly IndexFieldDefinition Path = $"{ComputedFieldNameCommonPrefix}{nameof(Path)}";
+        public static readonly IndexFieldDefinition Url = $"{ComputedFieldNameCommonPrefix}{nameof(Url)}";
+        public static readonly IndexFieldDefinition SearchTitle = $"{ComputedFieldNameCommonPrefix}{nameof(SearchTitle)}";
+        public static readonly IndexFieldDefinition SearchDescription = $"{ComputedFieldNameCommonPrefix}{nameof(SearchDescription)}";
+        public static readonly IndexFieldDefinition SearchContent = $"{ComputedFieldNameCommonPrefix}{nameof(SearchContent)}";
+        public static readonly IndexFieldDefinition<long> SearchDate = new($"{ComputedFieldNameCommonPrefix}{nameof(SearchDate)}", FieldDefinitionTypes.Long);
+
+        //If you need a custom field type, then use other constructors
+        public static readonly IndexFieldDefinition ItemType
+            = new FieldDefinition($"{ComputedFieldNameCommonPrefix}{nameof(ItemType)}", LuceneFaceting.FieldDefinitionTypes.FacetFullText);
+
+        public static readonly IndexFieldDefinition<string[]> SharedTags =
+            new(new FieldDefinition($"{ComputedFieldNameCommonPrefix}{nameof(SharedTags)}", LuceneFaceting.FieldDefinitionTypes.FacetFullText));
+
+        public static readonly IndexFieldDefinition<float[]> VectorSearchContent =
+            new(new VectorSearchField($"{ComputedFieldNameCommonPrefix}{nameof(VectorSearchContent)}", VectorSearchDimension, VectorSearchProfileName));
+    }
+}
+```
