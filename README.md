@@ -106,6 +106,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
     "InternalIndex"
   ],
   "PreviewIndexes": ["InternalIndex"],
+  "CustomIndexSuffix": "_Dev|_Staging|_DeveloperMachine|None",
   "Azure": {
     "ServiceUrl": "YOUR_AZURE_SEARCH_SERVICE_URL",
     "ApiKey": "YOUR_AZURE_SEARCH_API_KEY",
@@ -127,6 +128,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
 - **DefaultIndexName:** The default index to use if not specified in a search.
 - **Indexes**: A list of search index names to be used. Defaults to `["ExternalIndex"]`.
 - **PreviewIndexes**: A list of search index names where soft deletion is enabled.
+- **CustomIndexSuffix:** Allows to specify custom suffix applied to all of your configured indexes. Optional.
 - **Azure:** Azure Search service credentials.
 - **OpenAi:** OpenAI credentials for vector embeddings.
 
