@@ -116,7 +116,8 @@ Add a `SearchSettings` section to your `appsettings.json`.
     "ApiKey": "YOUR_OPENAI_API_KEY",
     "ServiceUrl": "YOUR_OPENAI_SERVICE_URL",
     "EmbeddingsDeploymentName": "text-embedding-3-large"
-  }
+  },
+  "EmbeddingsSqlPersistenceConnectionStringName": "umbracoDbDSN"
 }
 ```
 
@@ -131,6 +132,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
 - **CustomIndexSuffix:** Allows to specify custom suffix applied to all of your configured indexes. Optional.
 - **Azure:** Azure Search service credentials.
 - **OpenAi:** OpenAI credentials for vector embeddings.
+- **EmbeddingsSqlPersistenceConnectionStringName** sql server connection string name to persist embeddings from open ai.
 
 ## Basic Usage
 
