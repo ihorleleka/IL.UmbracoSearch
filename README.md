@@ -105,8 +105,9 @@ Add a `SearchSettings` section to your `appsettings.json`.
     "ExternalIndex",
     "InternalIndex"
   ],
+  "ReadOnly": false,
   "PreviewIndexes": ["InternalIndex"],
-  "CustomIndexSuffix": "_Dev|_Staging|_DeveloperMachine|None",
+  "CustomIndexSuffix": "Dev|Staging|DeveloperMachine|None",
   "Azure": {
     "ServiceUrl": "YOUR_AZURE_SEARCH_SERVICE_URL",
     "ApiKey": "YOUR_AZURE_SEARCH_API_KEY",
@@ -127,12 +128,13 @@ Add a `SearchSettings` section to your `appsettings.json`.
 
 - **LicenseToken:** Your license token for the package.
 - **DefaultIndexName:** The default index to use if not specified in a search.
+- **CustomIndexSuffix:** Allows to specify custom suffix applied to all of your configured indexes. Optional.
 - **Indexes**: A list of search index names to be used. Defaults to `["ExternalIndex"]`.
 - **PreviewIndexes**: A list of search index names where soft deletion is enabled.
-- **CustomIndexSuffix:** Allows to specify custom suffix applied to all of your configured indexes. Optional.
 - **Azure:** Azure Search service credentials.
 - **OpenAi:** OpenAI credentials for vector embeddings.
 - **EmbeddingsSqlPersistenceConnectionStringName** sql server connection string name to persist embeddings from open ai.
+- **ReadOnly:** Disallows runtime to create or modify existing index in any way.
 
 ## Basic Usage
 
@@ -355,4 +357,3 @@ public static class IndexingConstants
 ```
 
 </details>
-```
