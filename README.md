@@ -136,7 +136,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
 - **OpenAi:** OpenAI credentials for vector embeddings.
 - **EmbeddingsSqlPersistenceConnectionStringName** sql server connection string name to persist embeddings from open ai.
 - **ReadOnly:** Disallows runtime to create or modify existing index in any way.
-- **EnableBlueGreenIndexing** Allows to enable b/g indexing behavior when rebuilding index, so that old functional index temporary remains available for search operations.
+- **EnableBlueGreenIndexing:** Allows to enable b/g indexing behavior when rebuilding index, so that old functional index temporary remains available for search operations.
 
 ## Basic Usage
 
