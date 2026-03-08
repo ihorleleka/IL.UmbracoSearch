@@ -108,6 +108,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
   "ReadOnly": false,
   "PreviewIndexes": ["InternalIndex"],
   "CustomIndexSuffix": "Dev|Staging|DeveloperMachine|None",
+  "EnableBlueGreenIndexing": false,
   "Azure": {
     "ServiceUrl": "YOUR_AZURE_SEARCH_SERVICE_URL",
     "ApiKey": "YOUR_AZURE_SEARCH_API_KEY",
@@ -135,6 +136,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
 - **OpenAi:** OpenAI credentials for vector embeddings.
 - **EmbeddingsSqlPersistenceConnectionStringName** sql server connection string name to persist embeddings from open ai.
 - **ReadOnly:** Disallows runtime to create or modify existing index in any way.
+- **EnableBlueGreenIndexing** Allows to enable b/g indexing behavior when rebuilding index, so that old functional index temporary remains available for search operations.
 
 ## Basic Usage
 
