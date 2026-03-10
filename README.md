@@ -200,7 +200,7 @@ An example URL for this controller would be:
 <summary><strong>`SearchApiController` Code</strong></summary>
 
 ```csharp
-public class SearchApiController(ISearchService searchService, IIndexService indexService) : Controller
+public class SearchApiController(ISearchService searchService, IIndexingService indexService) : Controller
 {
     [HttpGet]
     public async Task<IActionResult> Search([FromQuery] string q = "",
