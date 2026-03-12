@@ -109,6 +109,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
   "PreviewIndexes": ["InternalIndex"],
   "CustomIndexSuffix": "Dev|Staging|DeveloperMachine|None",
   "EnableBlueGreenIndexing": false,
+  "DisableSwapDelay": false,
   "Azure": {
     "ServiceUrl": "YOUR_AZURE_SEARCH_SERVICE_URL",
     "ApiKey": "YOUR_AZURE_SEARCH_API_KEY",
@@ -137,6 +138,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
 - **EmbeddingsSqlPersistenceConnectionStringName** sql server connection string name to persist embeddings from open ai.
 - **ReadOnly:** Disallows runtime to create or modify existing index in any way.
 - **EnableBlueGreenIndexing:** Allows to enable b/g indexing behavior when rebuilding index, so that old functional index temporary remains available for search operations.
+- **DisableSwapDelay:** System will delay index swap to allow for indexing to be finalized (1 min per 1000 items of delay); you can disable this behavior with this flag (probably for dev/test purpose).
 
 ## Basic Usage
 
