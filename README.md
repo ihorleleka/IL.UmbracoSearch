@@ -119,8 +119,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
     "ApiKey": "YOUR_OPENAI_API_KEY",
     "ServiceUrl": "YOUR_OPENAI_SERVICE_URL",
     "EmbeddingsDeploymentName": "text-embedding-3-large"
-  },
-  "EmbeddingsSqlPersistenceConnectionStringName": "umbracoDbDSN"
+  }
 }
 ```
 
@@ -135,7 +134,6 @@ Add a `SearchSettings` section to your `appsettings.json`.
 - **PreviewIndexes**: A list of search index names where soft deletion is enabled.
 - **Azure:** Azure Search service credentials.
 - **OpenAi:** OpenAI credentials for vector embeddings.
-- **EmbeddingsSqlPersistenceConnectionStringName** sql server connection string name to persist embeddings from open ai.
 - **ReadOnly:** Disallows runtime to create or modify existing index in any way.
 - **EnableBlueGreenIndexing:** Allows to enable b/g indexing behavior when rebuilding index, so that old functional index temporary remains available for search operations.
 - **DisableSwapDelay:** System will delay index swap to allow for indexing to be finalized (1 min per 1000 items of delay); you can disable this behavior with this flag (probably for dev/test purpose).
@@ -202,7 +200,7 @@ An example URL for this controller would be:
 <summary><strong>`SearchApiController` Code</strong></summary>
 
 ```csharp
-public class SearchApiController(ISearchService searchService, IIndexingService indexService) : Controller
+public class SearchApiController(ISearchService searchService, IIndexService indexService) : Controller
 {
     [HttpGet]
     public async Task<IActionResult> Search([FromQuery] string q = "",
@@ -247,7 +245,7 @@ public class SearchApiController(ISearchService searchService, IIndexingService 
 
 The package supports multi-language indexing and search. The system automatically creates language-specific fields (e.g., `productName_en`, `productName_de`).
 
-Multi-language field can be defined by activating this option in constructors of IndexFieldDefinition<> class  `(..., multiLanguage: true)`.
+Multi-language fields can be defined via factory methods using `isMultiLanguage: true` (for example `IndexFieldDefinitionFactory.ForString(..., isMultiLanguage: true)`).
 
 Set the `LanguageIsoCode` property in `SearchParameters` to search in a specific language.
 
@@ -266,24 +264,36 @@ A class implementing this interface allows you to:
 
 ### Defining Index Fields
 
-Create instances of `IndexFieldDefinition<T>` for your custom fields. It's best practice to group these in a static constants class.
+Create field definitions with `IndexFieldDefinitionFactory` and group them in a static constants class.
 
 ```csharp
 public static class CustomIndexingConstants
 {
     public const string CustomFieldPrefix = "custom_";
 
-    // For string fields that need to be full-text searchable and sortable
-    public static readonly IndexFieldDefinition ProductName = new(
-        luceneFieldDefinition: new FieldDefinition(name: $"{CustomFieldPrefix}productName", type: FieldDefinitionTypes.FullText),
-        azureFieldDefinition: new SearchField(name: "custom_productName", type: SearchFieldDataType.String) { IsSearchable = true, IsSortable = true }
-    );
+    // Full-text searchable + sortable string field
+    public static readonly IndexFieldDefinition ProductName =
+        IndexFieldDefinitionFactory.ForString(
+            fieldName: $"{CustomFieldPrefix}productName",
+            isFacetable: false,
+            isSortable: true,
+            isFilterable: true);
 
-    // For multi-value string fields that need to be filterable and facetable
-    public static readonly IndexFieldDefinition<string[]> ProductCategories = new(
-        luceneFieldDefinition: new FieldDefinition(name: $"{CustomFieldPrefix}productCategories", type: IndexingConstants.LuceneFaceting.FieldDefinitionTypes.FacetFullText),
-        azureFieldDefinition: new SearchField(name: "custom_productCategories", type: SearchFieldDataType.Collection(SearchFieldDataType.String)) { IsFilterable = true, IsFacetable = true }
-    );
+    // Multi-value string field for filters/facets
+    public static readonly IndexFieldDefinition<string[]> ProductCategories =
+        IndexFieldDefinitionFactory.ForStringArray(
+            fieldName: $"{CustomFieldPrefix}productCategories",
+            isFacetable: true,
+            isFilterable: true);
+
+    // Vector field stored only in Azure (Lucene definition intentionally null)
+    public static readonly IndexFieldDefinition<float[]> ProductVector =
+        IndexFieldDefinitionFactory.Custom<float[]>(
+            luceneFieldDefinition: null,
+            azureFieldDefinition: new VectorSearchField(
+                name: $"{CustomFieldPrefix}productVector",
+                vectorSearchDimensions: 1536,
+                vectorSearchProfileName: "vector-profile"));
 }
 ```
 
@@ -353,9 +363,24 @@ public static class IndexingConstants
     {
         public const string ComputedFieldNameCommonPrefix = "computed";
 
-        public static readonly IndexFieldDefinition UmbracoNodeId = new(new SearchableField("nodeId") { IsKey = true });
-        public static readonly IndexFieldDefinition<int> UmbracoNodeIdInt = new FieldDefinition("intNodeId", FieldDefinitionTypes.Integer);
-        // ... and many more
+        public static readonly IndexFieldDefinition<int> UmbracoNodeIdInt =
+            IndexFieldDefinitionFactory.ForInt("intNodeId", isFacetable: false);
+
+        public static readonly IndexFieldDefinition Url =
+            IndexFieldDefinitionFactory.ForString(
+                $"{ComputedFieldNameCommonPrefix}{nameof(Url)}",
+                isFacetable: false,
+                isSortable: true,
+                isRaw: true,
+                isMultiLanguage: true);
+
+        public static readonly IndexFieldDefinition<float[]> VectorSearchContent =
+            IndexFieldDefinitionFactory.Custom<float[]>(
+                luceneFieldDefinition: null,
+                azureFieldDefinition: new VectorSearchField(
+                    $"{ComputedFieldNameCommonPrefix}{nameof(VectorSearchContent)}",
+                    1536,
+                    "vector-profile"));
     }
 }
 ```
