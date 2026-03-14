@@ -253,6 +253,10 @@ Set the `LanguageIsoCode` property in `SearchParameters` to search in a specific
 
 You can add your own custom fields to the search index by implementing the `IIndexingConverter` interface.
 
+> [!IMPORTANT]
+> `IndexFieldDefinition` constructors are no longer part of the public API.
+> Always create field definitions through `IndexFieldDefinitionFactory` (`ForString`, `ForStringArray`, `ForInt`, `ForBool`, `Custom` or `AutoDetection`).
+
 ### The `IIndexingConverter` Interface
 
 A class implementing this interface allows you to:
@@ -272,9 +276,10 @@ public static class CustomIndexingConstants
     public const string CustomFieldPrefix = "custom_";
 
     // Full-text searchable + sortable string field
-    public static readonly IndexFieldDefinition ProductName =
+    public static readonly IndexFieldDefinition<string> ProductName =
         IndexFieldDefinitionFactory.ForString(
             fieldName: $"{CustomFieldPrefix}productName",
+            isSearchable: true,
             isFacetable: false,
             isSortable: true,
             isFilterable: true);
