@@ -110,6 +110,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
   "CustomIndexSuffix": "Dev|Staging|DeveloperMachine|None",
   "EnableBlueGreenIndexing": false,
   "DisableSwapDelay": false,
+  "EnableTaxonomyFacetExpansion": false,
   "Azure": {
     "ServiceUrl": "YOUR_AZURE_SEARCH_SERVICE_URL",
     "ApiKey": "YOUR_AZURE_SEARCH_API_KEY",
@@ -137,6 +138,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
 - **ReadOnly:** Disallows runtime to create or modify existing index in any way.
 - **EnableBlueGreenIndexing:** Allows to enable b/g indexing behavior when rebuilding index, so that old functional index temporary remains available for search operations.
 - **DisableSwapDelay:** System will delay index swap to allow for indexing to be finalized (1 min per 1000 items of delay); you can disable this behavior with this flag (probably for dev/test purpose).
+- **EnableTaxonomyFacetExpansion:** Enables hierarchical taxonomy facet expansion for `TaxonomyTags` values. Keep disabled if you want to work with raw facet values only.
 
 ## Basic Usage
 
@@ -165,13 +167,57 @@ var searchParameters = new SearchParameters
     },
     FacetOn = new List<FacetOn>
     {
-        new FacetOn(IndexingConstants.ComputedIndexFields.SharedTags)
+        new FacetOn(IndexingConstants.ComputedIndexFields.TaxonomyTags)
     },
     LanguageIsoCode = "en-US"
 };
 
 var searchResults = await searchService.SearchAsync<CommonSearchItemModel>(searchParameters);
 ```
+
+### Taxonomy Indexing and Faceting
+
+The taxonomy helpers let you index a full taxonomy path once and then facet/filter on category levels separately from final tag values.
+
+#### Indexing taxonomy values
+
+Use `AddTaxonomyValue` during indexing. Each call accepts path segments and stores:
+- full value in `TaxonomyTags` as `"__"`-joined path (for example `Category__SubCategory__Tag`)
+- category-only path in `TaxonomyCategories` (for example `Category__SubCategory`)
+
+```csharp
+indexingObject
+    .AddTaxonomyValue("Category", "SubCategory", "TagName")
+    .AddTaxonomyValue("Category", "SubCategory", "TagName2");
+```
+
+#### Enabling hierarchical facet expansion
+
+Set the following appsetting to `true`:
+
+```json
+"SearchSettings": {
+  "EnableTaxonomyFacetExpansion": true
+}
+```
+
+When enabled, the decorator expands facets requested on `TaxonomyTags` into hierarchical levels.
+Use `TaxonomyCategories` for category filters and `TaxonomyTags` for terminal tag filters.
+
+```csharp
+var searchParameters = new SearchParameters
+{
+    FacetOn = [new FacetOn(IndexingConstants.ComputedIndexFields.TaxonomyTags)],
+    Filters =
+    [
+        // Drill down by category path
+        ISearchFilter.FilterFor(IndexingConstants.ComputedIndexFields.TaxonomyCategories,
+            "Category__SubCategory")
+    ]
+};
+```
+
+> `SharedTags` is still available as an obsolete alias for backwards compatibility; prefer `TaxonomyTags` for new code.
 
 ### The `SearchParameters` Object
 
