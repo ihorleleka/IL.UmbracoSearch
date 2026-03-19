@@ -201,8 +201,47 @@ Set the following appsetting to `true`:
 }
 ```
 
-When enabled, the decorator expands facets requested on `TaxonomyTags` into hierarchical levels.
-Use `TaxonomyCategories` for category filters and `TaxonomyTags` for terminal tag filters.
+When enabled, the decorator expands taxonomy facets into a hierarchy:
+- the root `Facet` is always bound to `TaxonomyCategories`
+- `Facet.ChildFacetsIndexFieldName` tells you which field to use for the next level
+- intermediate category nodes use `TaxonomyCategories`
+- terminal tag nodes use `TaxonomyTags`
+
+The top-level facet now exposes `Values` instead of a flat `Values` collection, and nested `FacetOption.Values` can be used to render sub-categories and tags.
+
+Example hierarchy for `Category__SubCategory__TagName` and `Category__SubCategory__TagName2`:
+
+```json
+[
+  {
+    "Label": "Category",
+    "IndexFieldName": "computedTaxonomyCategories",
+    "Value": "Category",
+    "HitsCount": 2,
+    "ChildFacetsIndexFieldName": "computedTaxonomyCategories",
+    "Values": [
+      {
+        "Label": "SubCategory",
+        "Value": "Category__SubCategory",
+        "HitsCount": 2,
+        "ChildFacetsIndexFieldName": "computedTaxonomyTags",
+        "Values": [
+          {
+            "Label": "TagName",
+            "Value": "Category__SubCategory__TagName",
+            "HitsCount": 1
+          },
+          {
+            "Label": "TagName2",
+            "Value": "Category__SubCategory__TagName2",
+            "HitsCount": 1
+          }
+        ]
+      }
+    ]
+  }
+]
+```
 
 ```csharp
 var searchParameters = new SearchParameters
