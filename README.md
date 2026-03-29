@@ -21,7 +21,7 @@ A comprehensive search solution for Umbraco, supporting both Lucene and Azure Se
   - [Customizing the Index](#customizing-the-index)
     - [The `IIndexingConverter` Interface](#the-iindexingconverter-interface)
     - [Defining Index Fields](#defining-index-fields)
-    - [Auto-Discovery with `[Service]` Attribute](#auto-discovery-with-service-attribute)
+    - [Auto-Discovery with DI Registration Attributes](#auto-discovery-with-di-registration-attributes)
     - [Example: Custom Indexing Converter](#example-custom-indexing-converter)
   - [Customizing Search Results](#customizing-search-results)
     - [`CommonSearchItemModel`](#commonsearchitemmodel)
@@ -270,7 +270,40 @@ This object allows you to define your query:
 - **FacetOn:** Request facet counts for specific fields.
 - **ExtraBoostingOptions:** Boost the score of certain documents.
 - **IndexName:** Specify which index to search.
+- **Root:** Restrict the search to a subtree by node ID or node key.
 - **LanguageIsoCode:** The culture to search in.
+- **EngineSpecific:** Optional escape hatch for engine-specific request customization right before execution.
+
+Example:
+
+```csharp
+var searchParameters = new SearchParameters
+{
+    FullTextSearch = new FullTextSearch("umbraco"),
+    Root = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+    EngineSpecific =
+    {
+        AzureRequestOverride = options =>
+        {
+            // Modify Azure SearchOptions right before SearchAsync executes
+        },
+        LuceneRequestOverride = query =>
+        {
+            // Modify the underlying LuceneSearchQuery right before Execute runs
+        }
+    }
+};
+```
+
+Both overrides are nullable and are invoked as `action?.Invoke(...)`.
+
+`Root` accepts all of these forms:
+
+```csharp
+Root = 123;
+Root = "123";
+Root = Guid.Parse("11111111-1111-1111-1111-111111111111");
+```
 
 ## Advanced Usage
 
@@ -334,6 +367,12 @@ Multi-language fields can be defined via factory methods using `isMultiLanguage:
 
 Set the `LanguageIsoCode` property in `SearchParameters` to search in a specific language.
 
+The library now normalizes and resolves language values consistently across indexing and search:
+- `en`, `en-GB`, and `en_GB` are all accepted
+- field suffixes are generated in a consistent `_en_gb` format
+- if the exact language is not configured but a partial match exists, the closest configured language is used
+- if the input cannot be matched at all, the system falls back to the default configured language during search
+
 ## Customizing the Index
 
 You can add your own custom fields to the search index by implementing the `IIndexingConverter` interface.
@@ -387,9 +426,11 @@ public static class CustomIndexingConstants
 }
 ```
 
-### Auto-Discovery with `[Service]` Attribute
+### Auto-Discovery with DI Registration Attributes
 
-Decorate your `IIndexingConverter` implementation with the `[Service]` attribute to have it automatically registered by the dependency injection container.
+Decorate your `IIndexingConverter` implementation with `[Service]`, `[ServiceWithOptions]`, or `[Decorator]` so it can be registered by the dependency injection container.
+
+The package now includes analyzer `ILUS0001`, which fails the build for concrete `IIndexingConverter` implementations that do not declare one of these IL.AttributeBasedDI registration attributes.
 
 ### Example: Custom Indexing Converter
 
