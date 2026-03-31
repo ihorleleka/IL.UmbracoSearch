@@ -250,7 +250,7 @@ var searchParameters = new SearchParameters
     Filters =
     [
         // Drill down by category path
-        ISearchFilter.FilterFor(IndexingConstants.ComputedIndexFields.TaxonomyCategories,
+        ISearchFilter.FilterForCollectionField(IndexingConstants.ComputedIndexFields.TaxonomyCategories,
             "Category__SubCategory")
     ]
 };
@@ -296,6 +296,37 @@ var searchParameters = new SearchParameters
 ```
 
 Both overrides are nullable and are invoked as `action?.Invoke(...)`.
+
+### Filter API
+
+Use the filter helper that matches the field shape:
+
+- `ISearchFilter.FilterFor(...)` for scalar `IndexFieldDefinition<T>` fields.
+- `ISearchFilter.FilterForCollectionField(...)` for collection fields such as `IndexFieldDefinition<string[]>`, `IndexFieldDefinition<int[]>`, `IndexFieldDefinition<List<string>>`, etc.
+- `ISearchFilter.FilterFor(IIndexFieldDefinition, ...)` as a dynamic fallback when the field is only known at runtime, for example after looking it up by name.
+
+Examples:
+
+```csharp
+Filters =
+[
+    ISearchFilter.FilterFor(CustomIndexingConstants.ProductName, "My Product"),
+    ISearchFilter.FilterFor(IndexingConstants.ComputedIndexFields.UmbracoNodeIdInt, 123),
+    ISearchFilter.FilterForCollectionField(CustomIndexingConstants.ProductCategories, "Category1", "Category2")
+];
+```
+
+When you have only `IIndexFieldDefinition` available, use the non-generic fallback:
+
+```csharp
+IIndexFieldDefinition field = GetFieldByName("custom_productCategories");
+var filter = ISearchFilter.FilterFor(field, "Category1", "Category2");
+```
+
+The package includes analyzers that fail the build when the wrong strongly-typed helper is used:
+
+- `ILUS0002`: `FilterFor(...)` used with a collection field
+- `ILUS0003`: `FilterForCollectionField(...)` used with a scalar field
 
 `Root` accepts all of these forms:
 
