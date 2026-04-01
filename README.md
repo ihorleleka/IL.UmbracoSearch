@@ -111,6 +111,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
   "EnableBlueGreenIndexing": false,
   "DisableSwapDelay": false,
   "EnableTaxonomyFacetExpansion": false,
+  "EnableTaxonomyFiltersExpansion": false,
   "Azure": {
     "ServiceUrl": "YOUR_AZURE_SEARCH_SERVICE_URL",
     "ApiKey": "YOUR_AZURE_SEARCH_API_KEY",
@@ -139,6 +140,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
 - **EnableBlueGreenIndexing:** Allows to enable b/g indexing behavior when rebuilding index, so that old functional index temporary remains available for search operations.
 - **DisableSwapDelay:** System will delay index swap to allow for indexing to be finalized (1 min per 1000 items of delay); you can disable this behavior with this flag (probably for dev/test purpose).
 - **EnableTaxonomyFacetExpansion:** Enables hierarchical taxonomy facet expansion for `TaxonomyTags` values. Keep disabled if you want to work with raw facet values only.
+- **EnableTaxonomyFiltersExpansion:** When taxonomy facet expansion is enabled, rewrites taxonomy `OR` filters so values from different category paths are split into separate filter groups.
 
 ## Basic Usage
 
@@ -197,7 +199,8 @@ Set the following appsetting to `true`:
 
 ```json
 "SearchSettings": {
-  "EnableTaxonomyFacetExpansion": true
+  "EnableTaxonomyFacetExpansion": true,
+  "EnableTaxonomyFiltersExpansion": true
 }
 ```
 
@@ -206,6 +209,23 @@ When enabled, the decorator expands taxonomy facets into a hierarchy:
 - `Facet.ChildFacetsIndexFieldName` tells you which field to use for the next level
 - intermediate category nodes use `TaxonomyCategories`
 - terminal tag nodes use `TaxonomyTags`
+
+When `EnableTaxonomyFiltersExpansion` is also enabled, taxonomy filters with `FilteringBehavior.Or` are normalized by category path before execution. For example:
+
+```csharp
+ISearchFilter.FilterFor(
+    IndexingConstants.ComputedIndexFields.TaxonomyTags,
+    FilteringBehavior.Or,
+    "Category1__Tag1",
+    "Category2__Tag2",
+    "Category2__Tag3")
+```
+
+is internally rewritten into two `OR` filters:
+- `["Category1__Tag1"]`
+- `["Category2__Tag2", "Category2__Tag3"]`
+
+This keeps same-category values grouped together while avoiding a single broad `OR` across unrelated taxonomy branches.
 
 The top-level facet now exposes `Values` instead of a flat `Values` collection, and nested `FacetOption.Values` can be used to render sub-categories and tags.
 
