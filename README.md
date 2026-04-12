@@ -15,6 +15,7 @@ A comprehensive search solution for Umbraco, supporting both Lucene and Azure Se
     - [Configuration Details](#configuration-details)
   - [Basic Usage](#basic-usage)
     - [The `SearchParameters` Object](#the-searchparameters-object)
+  - [Minimal API Endpoints](#minimal-api-endpoints)
   - [Advanced Usage](#advanced-usage)
     - [Advanced SearchApiController Example](#advanced-searchapicontroller-example)
     - [Multi-Language Support](#multi-language-support)
@@ -316,6 +317,53 @@ var searchParameters = new SearchParameters
 ```
 
 Both overrides are nullable and are invoked as `action?.Invoke(...)`.
+
+## Minimal API Endpoints
+
+The package includes opt-in minimal API registrations for teams that want a ready-made HTTP surface on top of `ISearchService`.
+
+```csharp
+app.UseSearch();
+app.UseSuggestionsSearch();
+```
+
+Default paths:
+
+- search: `/api/search`
+- suggestions: `/api/search/suggest`
+
+Both endpoints can be customized at registration time:
+
+```csharp
+app.UseSearch(options =>
+{
+    options.Path = "/custom/search";
+    options.SearchParametersOverride = static (httpContext, request, parameters, cancellationToken) =>
+    {
+        parameters.Aliases = ["contentPage"];
+        return ValueTask.FromResult(parameters);
+    };
+});
+
+app.UseSuggestionsSearch(options =>
+{
+    options.Path = "/custom/search/suggest";
+    options.SuggestionSettingsOverride = static (httpContext, request, parameters, cancellationToken) =>
+    {
+        parameters.Size = Math.Min(parameters.Size, 5);
+        return ValueTask.FromResult(parameters);
+    };
+});
+```
+
+If you want the same endpoint behavior with a different search result model, use the generic overloads:
+
+```csharp
+app.UseSearch<MySearchItemModel>();
+app.UseSuggestionsSearch<MySearchItemModel>();
+```
+
+The default request contracts are `SearchRequest` and `SuggestionsSearchRequest`. They are mapped onto `SearchParameters` and `SuggestionSettings`, and any unknown field names are ignored by default.
 
 ### Filter API
 
