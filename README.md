@@ -205,7 +205,7 @@ Set the following appsetting to `true`:
 }
 ```
 
-When enabled, the decorator expands taxonomy facets into a hierarchy:
+When enabled, the shared search pipeline expands taxonomy facets into a hierarchy:
 - the root `Facet` is always bound to `TaxonomyCategories`
 - `Facet.ChildFacetsIndexFieldName` tells you which field to use for the next level
 - intermediate category nodes use `TaxonomyCategories`
@@ -372,6 +372,7 @@ Use the filter helper that matches the field shape:
 - `ISearchFilter.FilterFor(...)` for scalar `IndexFieldDefinition<T>` fields.
 - `ISearchFilter.FilterForCollectionField(...)` for collection fields such as `IndexFieldDefinition<string[]>`, `IndexFieldDefinition<int[]>`, `IndexFieldDefinition<List<string>>`, etc.
 - `ISearchFilter.FilterFor(IIndexFieldDefinition, ...)` as a dynamic fallback when the field is only known at runtime, for example after looking it up by name.
+- `ISearchFilter.And(...)`, `ISearchFilter.Or(...)`, and `ISearchFilter.Not(...)` when you need to combine single-field filters into a more advanced expression.
 
 Examples:
 
@@ -382,6 +383,14 @@ Filters =
     ISearchFilter.FilterFor(IndexingConstants.ComputedIndexFields.UmbracoNodeIdInt, 123),
     ISearchFilter.FilterForCollectionField(CustomIndexingConstants.ProductCategories, "Category1", "Category2")
 ];
+```
+
+Each `FilterFor(...)` or `RangeFilterFor(...)` leaf targets a single field. When you need cross-field logic, compose leaves explicitly instead of putting multiple fields into one filter body:
+
+```csharp
+var filter = ISearchFilter.And(
+    ISearchFilter.FilterFor(CustomIndexingConstants.ProductName, "My Product"),
+    ISearchFilter.Not(ISearchFilter.FilterFor(IndexingConstants.ComputedIndexFields.ItemType, "archived")));
 ```
 
 When you have only `IIndexFieldDefinition` available, use the non-generic fallback:
@@ -485,8 +494,8 @@ You can add your own custom fields to the search index by implementing the `IInd
 A class implementing this interface allows you to:
 
 - **`GetIndexFieldDefinitions()`**: Return a collection of `IIndexFieldDefinition` objects that define your custom fields.
-- **`AddContentComputedFields()`**: Add computed values to your custom fields for each document being indexed.
-- **`AddMediaComputedFields()`**: Do the same for media items.
+- **`AddContentComputedFields(..., IndexingItemContext context)`**: Add computed values to your custom fields for each document being indexed.
+- **`AddMediaComputedFields(..., IndexingItemContext context)`**: Do the same for media items.
 - **`RunForIndexes()`**: Specify which indexes the converter should run for.
 
 ### Defining Index Fields
@@ -548,7 +557,7 @@ public class CustomIndexingConverter : IIndexingConverter
         };
     }
 
-    public void AddContentComputedFields(IPublishedContent? publishedContent, IndexingModel indexingObject)
+    public void AddContentComputedFields(IPublishedContent? publishedContent, IndexingModel indexingObject, IndexingItemContext context)
     {
         if (publishedContent != null)
         {
