@@ -36,6 +36,7 @@ A comprehensive search solution for Umbraco, supporting both Lucene and Azure Se
 - **Sorting:** Sort search results by relevance, date, or any other field.
 - **Faceting:** Get a count of the number of documents that match each value of a field.
 - **Hybrid search (Azure only):** Combine keyword search with vector search for more relevant results.
+- **Granular hybrid search (Azure only):** Optionally store chunk-level vectors per item (multi-vector field) for finer vector matching.
 - **Extensible:** Add your own custom fields to the search index.
 
 ## Quick Start
@@ -116,7 +117,13 @@ Add a `SearchSettings` section to your `appsettings.json`.
   "Azure": {
     "ServiceUrl": "YOUR_AZURE_SEARCH_SERVICE_URL",
     "ApiKey": "YOUR_AZURE_SEARCH_API_KEY",
-    "UseHybridSearch": false
+    "UseHybridSearch": false,
+    "UseGranularHybridSearch": false,
+    "GranularHybridChunkMinTokens": 2000,
+    "GranularHybridChunkMaxTokens": 3000,
+    "GranularHybridChunkOverlapTokens": 200,
+    "GranularHybridEmbeddingMaxConcurrency": 4,
+    "GranularHybridBackgroundEmbedding": false
   },
   "OpenAi": {
     "ApiKey": "YOUR_OPENAI_API_KEY",
@@ -137,6 +144,11 @@ Add a `SearchSettings` section to your `appsettings.json`.
 - **PreviewIndexes**: A list of search index names where soft deletion is enabled.
 - **Azure:** Azure Search service credentials.
 - **OpenAi:** OpenAI credentials for vector embeddings.
+- **Azure.UseHybridSearch:** Enables vector + keyword hybrid search.
+- **Azure.UseGranularHybridSearch:** Enables chunk-level multi-vector indexing in Azure in addition to the averaged vector.
+- **Azure.GranularHybridChunkMinTokens / MaxTokens / OverlapTokens:** Controls chunk granularity used for chunk-level vectors.
+- **Azure.GranularHybridEmbeddingMaxConcurrency:** Max parallel OpenAI embedding requests per indexed item when chunk vectors are generated.
+- **Azure.GranularHybridBackgroundEmbedding:** When enabled, average vector is indexed synchronously and chunk vectors are enriched asynchronously in background jobs.
 - **ReadOnly:** Disallows runtime to create or modify existing index in any way.
 - **EnableBlueGreenIndexing:** Allows to enable b/g indexing behavior when rebuilding index, so that old functional index temporary remains available for search operations.
 - **DisableSwapDelay:** System will delay index swap to allow for indexing to be finalized (1 min per 1000 items of delay); you can disable this behavior with this flag (probably for dev/test purpose).
@@ -192,6 +204,15 @@ Use `AddTaxonomyValue` during indexing. Each call accepts path segments and stor
 indexingObject
     .AddTaxonomyValue("Category", "SubCategory", "TagName")
     .AddTaxonomyValue("Category", "SubCategory", "TagName2");
+```
+
+You can also target custom taxonomy fields without changing existing calls:
+
+```csharp
+indexingObject.AddTaxonomyValue(
+    taxonomyTagsField: CustomIndexingConstants.ProductTags,
+    taxonomyCategoriesField: CustomIndexingConstants.ProductTagGroups,
+    "Category", "SubCategory", "TagName");
 ```
 
 #### Enabling hierarchical facet expansion
@@ -276,8 +297,6 @@ var searchParameters = new SearchParameters
     ]
 };
 ```
-
-> `SharedTags` is still available as an obsolete alias for backwards compatibility; prefer `TaxonomyTags` for new code.
 
 ### The `SearchParameters` Object
 
@@ -481,6 +500,29 @@ The library now normalizes and resolves language values consistently across inde
 - if the exact language is not configured but a partial match exists, the closest configured language is used
 - if the input cannot be matched at all, the system falls back to the default configured language during search
 
+### Hybrid And Granular Vectorization Notes
+
+- The existing averaged vector behavior is preserved for large sources (source is chunked and embeddings are averaged).
+- Chunk-level vectors are generated only when `UseGranularHybridSearch` is enabled.
+- Small documents (below token threshold used for single-pass embedding) are short-circuited to average-only vector storage; chunk vectors are skipped to reduce indexing/storage volume.
+- Reindexing unchanged content does not regenerate chunk vectors: cache invalidation uses a hash of the full source content used for vectorization.
+- Chunk planning metadata (tokenization/chunk split result) is cached by source hash and chunk settings to avoid repeated re-tokenization work across reindex operations.
+- Azure multi-vector fields currently allow up to 100 vectors per document (across complex collection vector fields). If configured chunk granularity would exceed this quota, the system automatically increases effective chunk size and logs a warning.
+
+### Granular Chunk Size Recommendations
+
+Choose chunking based on retrieval quality needs and expected content size:
+
+- **Balanced default (recommended for most sites):** `Min=2000`, `Max=3000`, `Overlap=200`
+- **Higher precision semantic matching (short sections, FAQs, product specs):** `Min=600`, `Max=900`, `Overlap=100`
+- **Very granular matching (only when you need narrow passage recall):** `Min=400`, `Max=500`, `Overlap=50`
+- **Long-form content efficiency (large articles/docs, lower indexing cost):** `Min=2500`, `Max=4000`, `Overlap=200`
+
+Notes:
+- More granular chunks increase vector count and indexing/storage cost.
+- If your chosen values would create more than 100 chunk vectors for an item, the system increases chunk size automatically to stay within quota and logs:
+  `system had to increase chunk size because otherwise vectors count exceeds quota (100)`.
+
 ## Customizing the Index
 
 You can add your own custom fields to the search index by implementing the `IIndexingConverter` interface.
@@ -543,6 +585,7 @@ The package now includes analyzer `ILUS0001`, which fails the build for concrete
 ### Example: Custom Indexing Converter
 
 ```csharp
+
 [Service<SearchOptions>(Lifetime = ServiceLifetime.Singleton, Feature = SearchOptions.Lucene | SearchOptions.Azure)]
 public class CustomIndexingConverter : IIndexingConverter
 {
@@ -563,10 +606,26 @@ public class CustomIndexingConverter : IIndexingConverter
         {
             indexingObject.SetComputedValue(CustomIndexingConstants.ProductName, "My Product");
             indexingObject.SetComputedValue(CustomIndexingConstants.ProductCategories, new[] { "Category1", "Category2" });
+            indexingObject.SetVectorContent("Long text used for vectorization...");
+            indexingObject.SetVectorContentPrecise("Long text used for vectorization (settings-driven chunking)...");
+            indexingObject.SetVectorContentPreciseManual(
+                "Long text used for vectorization (manual chunking)...",
+                minTokens: 600,
+                maxTokens: 900,
+                overlapTokens: 100);
         }
     }
 }
 ```
+
+Use dedicated vector helpers:
+- `SetVectorContent(...)`: average-vector content.
+- `SetVectorContentPrecise(...)`: chunk-vector content using `SearchSettings.Azure` chunk settings.
+- `SetVectorContentPreciseManual(...)`: chunk-vector content with per-item manual chunk sizing.
+
+Behavior notes:
+- If granular hybrid search is enabled and `SetVectorContentPrecise(...)` is not called, granular chunk vectors automatically reuse the `SetVectorContent(...)` content with settings-based chunk sizes.
+- `SetVectorContent(...)` and `SetVectorContentPrecise(...)` can use different content values for average-vector and chunk-vector flows.
 
 ## Customizing Search Results
 
