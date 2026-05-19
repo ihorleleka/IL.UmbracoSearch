@@ -165,7 +165,7 @@ var searchParameters = new SearchParameters
     FullTextSearch = new FullTextSearch("umbraco", useHybridSearch: true),
     Skip = 0,
     Take = 10,
-    Aliases = new[] { "contentPage" },
+    Aliases = ["contentPage"],
     SearchOrderings = new List<ISearchOrdering>
     {
         ISearchOrdering.ByScore(OrderingType.Descending),
@@ -173,8 +173,8 @@ var searchParameters = new SearchParameters
     },
     Filters =
     [
-        ISearchFilter.FilterForCollectionField(
-            IndexingConstants.ComputedIndexFields.NodeTypeAlias,
+        ISearchFilter.FilterFor(
+            IndexingConstants.ComputedIndexFields.ContentType, //this filter does same as  Aliases = ["contentPage"]
             "contentPage"),
         ISearchFilter.FilterFor(
             IndexingConstants.ComputedIndexFields.UmbracoNodeIdInt,
