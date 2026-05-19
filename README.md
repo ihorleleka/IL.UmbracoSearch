@@ -171,15 +171,18 @@ var searchParameters = new SearchParameters
         ISearchOrdering.ByScore(OrderingType.Descending),
         ISearchOrdering.ByField(IndexingConstants.ComputedIndexFields.SearchDate, OrderingType.Descending)
     },
-    Filters = new List<SearchFilterBase>
-    {
-        new SearchFilter
-        {
-            Fields = [IndexingConstants.ComputedIndexFields.NodeTypeAlias],
-            Values = new[] { "contentPage" },
-            FilteringBehavior = FilteringBehavior.And
-        }
-    },
+    Filters =
+    [
+        ISearchFilter.FilterForCollectionField(
+            IndexingConstants.ComputedIndexFields.NodeTypeAlias,
+            "contentPage"),
+        ISearchFilter.FilterFor(
+            IndexingConstants.ComputedIndexFields.UmbracoNodeIdInt,
+            1234),
+        ISearchFilter.FilterForCollectionField(
+            IndexingConstants.ComputedIndexFields.TaxonomyTags,
+            "Category__SubCategory__TagName")
+    ],
     FacetOn = new List<FacetOn>
     {
         new FacetOn(IndexingConstants.ComputedIndexFields.TaxonomyTags)
