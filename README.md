@@ -16,6 +16,7 @@ A comprehensive search solution for Umbraco, supporting both Lucene and Azure Se
   - [Basic Usage](#basic-usage)
     - [The `SearchParameters` Object](#the-searchparameters-object)
   - [Minimal API Endpoints](#minimal-api-endpoints)
+  - [MCP Tools](#mcp-tools)
   - [Advanced Usage](#advanced-usage)
     - [Advanced SearchApiController Example](#advanced-searchapicontroller-example)
     - [Multi-Language Support](#multi-language-support)
@@ -165,7 +166,7 @@ var searchParameters = new SearchParameters
     FullTextSearch = new FullTextSearch("umbraco", useHybridSearch: true),
     Skip = 0,
     Take = 10,
-    Aliases = ["contentPage"],
+    Aliases = new[] { "contentPage" },
     SearchOrderings = new List<ISearchOrdering>
     {
         ISearchOrdering.ByScore(OrderingType.Descending),
@@ -173,8 +174,8 @@ var searchParameters = new SearchParameters
     },
     Filters =
     [
-        ISearchFilter.FilterFor(
-            IndexingConstants.ComputedIndexFields.ContentType, //this filter does same as  Aliases = ["contentPage"]
+        ISearchFilter.FilterForCollectionField(
+            IndexingConstants.ComputedIndexFields.NodeTypeAlias,
             "contentPage"),
         ISearchFilter.FilterFor(
             IndexingConstants.ComputedIndexFields.UmbracoNodeIdInt,
@@ -386,6 +387,114 @@ app.UseSuggestionsSearch<MySearchItemModel>();
 ```
 
 The default request contracts are `SearchRequest` and `SuggestionsSearchRequest`. They are mapped onto `SearchParameters` and `SuggestionSettings`, and any unknown field names are ignored by default.
+
+## MCP Tools
+
+The package includes opt-in Model Context Protocol tool registration for exposing search to MCP clients.
+
+Built-in tools:
+
+- `fetchAvailableIndexes`: returns `DefaultIndexName`, `Indexes`, and `PreviewIndexes` from `SearchSettings`.
+- `search`: runs a default content search with `(string? indexName, string? q, int top_k = 5)`.
+
+Register the tools directly from `builder.Services`:
+
+```csharp
+using IL.UmbracoSearch.Search.Mcp;
+
+builder.Services
+    .AddUmbracoSearchMcpTools()
+    .WithHttpTransport();
+
+app.MapMcp("/searchMcp");
+```
+
+Or add the tools to an existing MCP server builder:
+
+```csharp
+builder.Services
+    .AddMcpServer()
+    .WithHttpTransport()
+    .WithUmbracoSearchTools();
+
+app.MapMcp("/searchMcp");
+```
+
+`AddUmbracoSearchMcpTools()` and `WithUmbracoSearchTools()` register the IL.UmbracoSearch MCP service and add the package tools. The package does not force a transport; configure the MCP transport in the consuming app. For an HTTP MCP endpoint, add the MCP ASP.NET Core package in the web app and configure transport/routing there.
+
+The default `search` tool maps `q` to `FullTextSearch`, `indexName` to `SearchParameters.IndexName`, and clamps `top_k` to `1..50`. When `SearchSettings.Azure.UseHybridSearch` is enabled, MCP search also enables hybrid full-text search by default. It returns common result fields: `id`, `title`, `description`, `url`, `languageIsoCode`, plus `additionalData`.
+
+Customize the default query or map each returned item:
+
+```csharp
+builder.Services.AddUmbracoSearchMcpTools(options =>
+{
+    options.SearchParametersOverride = static (request, parameters, cancellationToken) =>
+    {
+        parameters.Aliases = ["contentPage"];
+        return ValueTask.FromResult(parameters);
+    };
+
+    options.ResultMapper = static (context, cancellationToken) =>
+        ValueTask.FromResult(new McpSearchItem
+        {
+            Id = context.Item.Id,
+            Title = context.Item.SearchTitle ?? context.Item.NodeName,
+            Description = context.Item.SearchDescription,
+            Url = context.Item.Url,
+            AdditionalData = new Dictionary<string, object?>
+            {
+                ["nodeName"] = context.Item.NodeName,
+                ["requestedIndex"] = context.Request.IndexName
+            }
+        });
+}).WithHttpTransport();
+```
+
+Use a custom strongly typed search result model when you want the mapper to work with your own result properties or `ValueFor(...)` calls:
+
+```csharp
+builder.Services
+    .AddUmbracoSearchMcpTools<ProductSearchItem>(options =>
+    {
+        options.ResultMapper = static (context, cancellationToken) =>
+            ValueTask.FromResult(new McpSearchItem
+            {
+                Id = context.Item.ProductId,
+                Title = context.Item.ValueFor(CustomIndexingConstants.ProductName),
+                AdditionalData = new Dictionary<string, object?>
+                {
+                    ["sku"] = context.Item.ValueFor(CustomIndexingConstants.ProductSku)
+                }
+            });
+    })
+    .WithHttpTransport();
+```
+
+For a fully custom MCP search implementation, replace/decorate `IUmbracoSearchMcpService` in DI. The MCP tool layer calls that service for both `fetchAvailableIndexes` and `search`.
+
+Rate limiting should be configured in the consuming app, CDN, or hosting layer because that layer owns the MCP transport, endpoint routing, authentication, and client identity. For an ASP.NET Core fixed-window limit on the MCP endpoint:
+
+```csharp
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("umbraco-search-mcp", limiter =>
+    {
+        limiter.PermitLimit = 60;
+        limiter.Window = TimeSpan.FromMinutes(1);
+        limiter.QueueLimit = 0;
+    });
+});
+
+builder.Services
+    .AddUmbracoSearchMcpTools()
+    .WithHttpTransport();
+
+app.UseRateLimiter();
+
+app.MapMcp("/searchMcp")
+    .RequireRateLimiting("umbraco-search-mcp");
+```
 
 ### Filter API
 
