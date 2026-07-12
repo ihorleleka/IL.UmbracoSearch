@@ -119,12 +119,18 @@ Add a `SearchSettings` section to your `appsettings.json`.
     "ServiceUrl": "YOUR_AZURE_SEARCH_SERVICE_URL",
     "ApiKey": "YOUR_AZURE_SEARCH_API_KEY",
     "UseHybridSearch": false,
-    "UseGranularHybridSearch": false,
-    "GranularHybridChunkMinTokens": 2000,
-    "GranularHybridChunkMaxTokens": 3000,
-    "GranularHybridChunkOverlapTokens": 200,
-    "GranularHybridEmbeddingMaxConcurrency": 4,
-    "GranularHybridBackgroundEmbedding": false
+    "UseChunkedVectorSearch": false,
+    "ChunkedVectorMinTokens": 2000,
+    "ChunkedVectorMaxTokens": 3000,
+    "ChunkedVectorOverlapTokens": 200,
+    "ChunkedVectorEmbeddingMaxConcurrency": 4,
+    "BackgroundEmbeddingsProcessing": false,
+    "DocumentBatchMaxActions": 100,
+    "DocumentBatchMaxPayloadBytes": 14680064,
+    "DocumentBatchFlushIntervalMilliseconds": 250,
+    "DocumentBatchQueueCapacity": 2000,
+    "DocumentBatchMaxRetries": 3,
+    "BackgroundEmbeddingsMaxConcurrency": 4
   },
   "OpenAi": {
     "ApiKey": "YOUR_OPENAI_API_KEY",
@@ -146,10 +152,14 @@ Add a `SearchSettings` section to your `appsettings.json`.
 - **Azure:** Azure Search service credentials.
 - **OpenAi:** OpenAI credentials for vector embeddings.
 - **Azure.UseHybridSearch:** Enables vector + keyword hybrid search.
-- **Azure.UseGranularHybridSearch:** Enables chunk-level multi-vector indexing in Azure in addition to the averaged vector.
-- **Azure.GranularHybridChunkMinTokens / MaxTokens / OverlapTokens:** Controls chunk granularity used for chunk-level vectors.
-- **Azure.GranularHybridEmbeddingMaxConcurrency:** Max parallel OpenAI embedding requests per indexed item when chunk vectors are generated.
-- **Azure.GranularHybridBackgroundEmbedding:** When enabled, average vector is indexed synchronously and chunk vectors are enriched asynchronously in background jobs.
+- **Azure.UseChunkedVectorSearch:** Enables chunk-level multi-vector indexing in Azure in addition to the averaged vector.
+- **Azure.ChunkedVectorMinTokens / MaxTokens / OverlapTokens:** Controls chunk granularity used for chunk-level vectors.
+- **Azure.ChunkedVectorEmbeddingMaxConcurrency:** Max parallel OpenAI embedding requests per indexed item when chunk vectors are generated.
+- **Azure.BackgroundEmbeddingsProcessing:** Enables durable background processing for both average and chunk vectors. Azure document writes are batched and become eventually consistent. Defaults to `false`; when enabled, both vector fields may be unavailable briefly after indexing.
+- **Azure.DocumentBatchMaxActions / DocumentBatchMaxPayloadBytes / DocumentBatchFlushIntervalMilliseconds:** Bounds each Azure merge-or-upload batch by action count, serialized payload size, and maximum wait time. Defaults are `100`, `14680064` (14 MiB), and `250` ms.
+- **Azure.DocumentBatchQueueCapacity:** Maximum accepted-but-not-yet-sent document writes. When full, indexing waits for capacity instead of creating unbounded in-memory work. Defaults to `2000`.
+- **Azure.DocumentBatchMaxRetries:** Retry limit for transient Azure indexing failures (`408`, `429`, and `5xx`). Defaults to `3`; permanent action failures are logged and reported by rebuild flush.
+- **Azure.BackgroundEmbeddingsMaxConcurrency:** Maximum number of independent durable vector jobs processed concurrently. Defaults to `4`.
 - **ReadOnly:** Disallows runtime to create or modify existing index in any way.
 - **EnableBlueGreenIndexing:** Allows to enable b/g indexing behavior when rebuilding index, so that old functional index temporary remains available for search operations.
 - **DisableSwapDelay:** System will delay index swap to allow for indexing to be finalized (1 min per 1000 items of delay); you can disable this behavior with this flag (probably for dev/test purpose).
@@ -615,11 +625,12 @@ The library now normalizes and resolves language values consistently across inde
 ### Hybrid And Granular Vectorization Notes
 
 - The existing averaged vector behavior is preserved for large sources (source is chunked and embeddings are averaged).
-- Chunk-level vectors are generated only when `UseGranularHybridSearch` is enabled.
+- Chunk-level vectors are generated only when `UseChunkedVectorSearch` is enabled.
 - Small documents (below token threshold used for single-pass embedding) are short-circuited to average-only vector storage; chunk vectors are skipped to reduce indexing/storage volume.
 - Reindexing unchanged content does not regenerate chunk vectors: cache invalidation uses a hash of the full source content used for vectorization.
 - Chunk planning metadata (tokenization/chunk split result) is cached by source hash and chunk settings to avoid repeated re-tokenization work across reindex operations.
 - Azure multi-vector fields currently allow up to 100 vectors per document (across complex collection vector fields). If configured chunk granularity would exceed this quota, the system automatically increases effective chunk size and logs a warning.
+- When `BackgroundEmbeddingsProcessing` is enabled, indexing events enqueue bounded Azure document writes instead of waiting for Azure. Rebuild completion drains those document batches, but average and chunk vector enrichment remains eventually consistent.
 
 ### Granular Chunk Size Recommendations
 
