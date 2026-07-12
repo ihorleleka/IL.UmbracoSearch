@@ -144,7 +144,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
 
 ### Configuration Details
 
-- **LicenseToken:** Your license token for the package.
+- **LicenseToken:** Required when using the Azure feature; Lucene does not require a license token.
 - **DefaultIndexName:** The default index to use if not specified in a search.
 - **CustomIndexSuffix:** Allows to specify custom suffix applied to all of your configured indexes. Optional.
 - **Indexes**: A list of search index names to be used. Defaults to `["ExternalIndex"]`.
