@@ -1,201 +1,361 @@
-# Agent-Readme
+# IL.UmbracoSearch — NuGet consumer agent memory
 
-Purpose: implementation playbook for coding agents integrating `IL.UmbracoSearch` in real projects.
+Use this file as the implementation playbook when `IL.UmbracoSearch` is installed from NuGet and source code is unavailable. It records the public configuration, extension points, behavior contracts, and troubleshooting rules needed to build a search feature in an Umbraco application.
 
-## Core Model
+## What this package is
 
-- Primary responsibilities:
-  - indexing Umbraco data into existing indexes
-  - querying with full-text, filters, sorting, facets, boosts, suggestions
-  - engine abstraction over Lucene and Azure
-- Main extension seam: `IIndexingConverter`
-- Main runtime entrypoint: `ISearchService`
+`IL.UmbracoSearch` adds a search abstraction and extensible computed indexing to **existing Umbraco/Examine indexes**. It does not create Lucene indexes. The consuming application must have real Umbraco indexes (normally `ExternalIndex`, optionally `InternalIndex`) and configure the package to use them.
 
-## Engine Choice
+It provides:
 
-- `SearchOptions.Lucene`:
-  - no vector search
-  - strong local/full-text/facets path
-- `SearchOptions.Azure`:
-  - full-text + filters + facets + boosts + suggestions
-  - optional hybrid vector search
-  - optional granular chunk vectors
+- full-text search, typed filtering, sorting, boosts, facets, suggestions, and language-aware fields;
+- custom indexing through `IIndexingConverter`;
+- two mutually selected engine paths: Lucene or Azure AI Search;
+- optional Azure hybrid keyword/vector search and optional chunk-level vectors;
+- optional minimal HTTP endpoints and MCP search tools.
 
-Agents must align implementation with enabled feature flag(s) in DI registration.
+The main runtime service is `ISearchService`. The main customization seam is `IIndexingConverter`.
 
-## Bootstrapping Checklist
+## Non-negotiable contracts
 
-1. Register feature:
+- Register **one appropriate engine feature**: `SearchOptions.Lucene` or `SearchOptions.Azure`.
+- `SearchSettings.Indexes` contains the real Umbraco indexes this package may manage. In Azure mode it is also the lifecycle allow-list: do not configure or expect the package to provision/rebuild unrelated indexes.
+- `DefaultIndexName` is used whenever a request omits `IndexName`.
+- Invalid `LicenseToken` fails initialization. Treat it as a startup/configuration issue, never as a query error to suppress.
+- An absent or misspelled configured index can result in a logged error and empty results rather than an obvious startup failure. Include this in operational tests.
+- Use typed index fields and typed filter helpers. The shape of an indexed field (scalar vs collection, multi-language, facetable/sortable) is part of the query contract.
+- Do not rely on Lucene for hybrid/vector behavior; those are Azure-only capabilities.
+- The application that exposes HTTP or MCP endpoints owns authorization, authentication, rate limiting, tenancy, and public request limits.
+
+## Install and register
+
+Install the NuGet package in the Umbraco web application, then enable the desired feature using the attribute-based DI registration used by the package:
+
 ```csharp
 builder.AddServiceAttributeBasedDependencyInjection(options =>
 {
-    options.AddFeature(SearchOptions.Lucene); // or SearchOptions.Azure
+    options.AddFeature(SearchOptions.Lucene);
+    // Or, for Azure AI Search:
+    // options.AddFeature(SearchOptions.Azure);
 });
 ```
-2. Add `SearchSettings` config section.
-3. Ensure `LicenseToken` is valid (initialization is fail-fast on invalid token).
-4. Ensure `Indexes` names match real existing Umbraco indexes.
 
-## SearchSettings Keys You Usually Need
+Do not enable Azure-specific query/indexing behavior when only `SearchOptions.Lucene` is registered. Choose the engine from deployment requirements, not from an individual caller’s preference.
 
-- Always:
-  - `LicenseToken`
-  - `DefaultIndexName`
-  - `Indexes`
-  - optional `PreviewIndexes`
-  - optional `CustomIndexSuffix`
-  - optional `EnableBlueGreenIndexing`
-  - optional `ReadOnly`
-- Taxonomy behavior:
-  - `EnableTaxonomyFacetExpansion`
-  - `EnableTaxonomyFiltersExpansion`
-- Azure mode:
-  - `Azure.ServiceUrl`, `Azure.ApiKey`
-  - `Azure.UseHybridSearch`
-  - `Azure.UseGranularHybridSearch`
-  - chunk tuning + background settings
-- Hybrid search mode:
-  - `OpenAi.ServiceUrl`, `OpenAi.ApiKey`, `OpenAi.EmbeddingsDeploymentName`
+## Configuration
 
-## Query Construction Contract
+Place this under `SearchSettings` in application configuration. Keep tokens/keys in secret management, not committed settings.
 
-Use `SearchParameters` and call:
-```csharp
-await searchService.SearchAsync<CommonSearchItemModel>(parameters);
+```json
+"SearchSettings": {
+  "LicenseToken": "<license-token>",
+  "DefaultIndexName": "ExternalIndex",
+  "Indexes": ["ExternalIndex", "InternalIndex"],
+  "PreviewIndexes": ["InternalIndex"],
+  "ReadOnly": false,
+  "CustomIndexSuffix": "",
+  "EnableBlueGreenIndexing": false,
+  "DisableSwapDelay": false,
+  "EnableTaxonomyFacetExpansion": false,
+  "EnableTaxonomyFiltersExpansion": false,
+  "Azure": {
+    "ServiceUrl": "<azure-search-url>",
+    "ApiKey": "<azure-search-key>",
+    "UseHybridSearch": false,
+    "UseChunkedVectorSearch": false,
+    "ChunkedVectorMinTokens": 2000,
+    "ChunkedVectorMaxTokens": 3000,
+    "ChunkedVectorOverlapTokens": 200,
+    "ChunkedVectorEmbeddingMaxConcurrency": 4,
+    "BackgroundEmbeddingsProcessing": false,
+    "DocumentBatchMaxActions": 100,
+    "DocumentBatchMaxPayloadBytes": 14680064,
+    "DocumentBatchFlushIntervalMilliseconds": 250,
+    "DocumentBatchQueueCapacity": 2000,
+    "DocumentBatchMaxRetries": 3,
+    "BackgroundEmbeddingsMaxConcurrency": 4
+  },
+  "OpenAi": {
+    "ServiceUrl": "<embedding-service-url>",
+    "ApiKey": "<embedding-service-key>",
+    "EmbeddingsDeploymentName": "text-embedding-3-large"
+  }
+}
 ```
 
-Important fields:
-- `FullTextSearch`
-- `Skip`, `Take`
-- `Aliases`
-- `SearchOrderings`
-- `Filters`
-- `FacetOn`
-- `ExtraBoostingOptions`
-- `Root`
-- `LanguageIsoCode`
-- `EngineSpecific` (last-mile escape hatch)
+| Setting | Consumer impact |
+| --- | --- |
+| `DefaultIndexName` | The default target for searches and suggestions without an explicit index. |
+| `Indexes` | Existing Umbraco indexes this package can use/manage; Azure index lifecycle is restricted to this list. |
+| `PreviewIndexes` | Indexes where preview/soft-delete semantics apply. |
+| `ReadOnly` | Prevents package write/provisioning behavior; use for read-only application nodes. |
+| `CustomIndexSuffix` | Distinguishes physical Azure indexes across environments. Keep it consistent per environment. |
+| `EnableBlueGreenIndexing` | Azure rebuilds use alternate physical indexes before a swap; do not enable casually without an operational rebuild plan. |
+| Taxonomy expansion flags | Opt into hierarchical taxonomy facets and compatible taxonomy `OR` filter rewriting. |
+| `Azure.*` | Required Azure connection and throughput/vector settings when Azure feature is selected. |
+| `OpenAi.*` | Required for generated embeddings when hybrid search is enabled. |
 
-## Filtering Rules (High Priority)
+`ReadOnly`, server role, and `Indexes` are hard safety constraints for Azure operations. A search feature must not attempt to work around them.
 
-Use typed helpers correctly:
-- scalar fields: `ISearchFilter.FilterFor(...)`
-- collection fields: `ISearchFilter.FilterForCollectionField(...)`
-- dynamic field fallback: `ISearchFilter.FilterFor(IIndexFieldDefinition, ...)`
+## Fast decision guide
 
-Analyzer-enforced mistakes:
-- `ILUS0002`: scalar method used with collection field
-- `ILUS0003`: collection method used with scalar field
+| Need | Use |
+| --- | --- |
+| Standard keyword search | Lucene or Azure + `ISearchService.SearchAsync<T>()` |
+| Search by structured value | Typed `ISearchFilter` using the matching field shape |
+| Search within a content type | `SearchParameters.Aliases` |
+| Browse/filter UI counts | Facetable typed field + `FacetOn` |
+| Hierarchical tags | `AddTaxonomyValue` + taxonomy fields/options |
+| Search in a subtree | `SearchParameters.Root` |
+| Local/relevance-first search | Lucene |
+| Managed Azure search, hybrid semantic relevance | Azure + `UseHybridSearch` |
+| Chunk-level vector matching | Azure + `UseChunkedVectorSearch` |
+| Custom fields calculated from Umbraco content/media | `IIndexingConverter` |
+| Ready-made browser endpoint | `UseSearch` / `UseSuggestionsSearch` |
+| Search for an AI/MCP client | `AddUmbracoSearchMcpTools` or `WithUmbracoSearchTools` |
 
-Cross-field logic must be composed via filter trees (`And`/`Or`/`Not`), not packed into one leaf.
+## Build a normal query
 
-## Sorting, Boosting, Faceting
+Inject `ISearchService` and use `SearchParameters`:
 
-- Sorting:
-  - use `ISearchOrdering.ByScore(...)` / `ByField(...)`
-- Boosting:
-  - use `ExtraBoostingOptions` with field + value + boost factor
-- Facets:
-  - use `FacetOn(field)`
-  - supports `AmountOfTopFacetsToTake`
-  - supports `AllowMultiLanguageFaceting`
+```csharp
+var parameters = new SearchParameters
+{
+    FullTextSearch = new FullTextSearch("umbraco"),
+    Skip = 0,
+    Take = 20,
+    Aliases = ["contentPage"],
+    LanguageIsoCode = "en-US",
+    SearchOrderings =
+    [
+        ISearchOrdering.ByScore(OrderingType.Descending),
+        ISearchOrdering.ByField(IndexingConstants.ComputedIndexFields.SearchDate, OrderingType.Descending)
+    ]
+};
 
-## Taxonomy Behavior
+var results = await searchService.SearchAsync<CommonSearchItemModel>(parameters);
+```
 
-Indexing taxonomy:
-- use `indexingObject.AddTaxonomyValue("Category", "SubCategory", "Tag")`
-- library writes:
-  - full path to `TaxonomyTags`
-  - category path to `TaxonomyCategories`
+`SearchParameters` contract:
 
-Querying taxonomy:
-- facet on `TaxonomyTags`
-- filter by `TaxonomyCategories` for drilldown
+- `IndexName`: optional; fallback is `DefaultIndexName`.
+- `FullTextSearch`: keywords, optional typed field targeting/boosts, wildcard option, and Azure hybrid controls.
+- `Skip` / `Take`: paging. Public endpoints should impose their own maximum `Take`.
+- `Aliases`: Umbraco content type aliases.
+- `Filters`: typed conditions or `And`/`Or`/`Not` filter trees.
+- `SearchOrderings`: relevance or typed field ordering.
+- `FacetOn`: requested facets.
+- `ExtraBoostingOptions`: value-specific score boosts.
+- `Root`: limits results to a node/key subtree.
+- `LanguageIsoCode`: requested culture. It is normalized against available Umbraco languages; default language is handled as the base field.
+- `IncludeExcludedFromSearch`: opt into normally excluded/soft-deleted content only when that is intentional.
+- `EngineSpecific`: last-mile native engine overrides. Prefer the portable model; an override makes engine parity the caller’s responsibility.
 
-Optional normalization:
-- with both `EnableTaxonomyFacetExpansion=true` and `EnableTaxonomyFiltersExpansion=true`,
-  - taxonomy `OR` filters are regrouped by category path
-  - facet tree is expanded into hierarchy for UI rendering
+Use `CommonSearchItemModel` for a conventional result. A feature-specific result model inherits `SearchResultModelBase` and reads defined fields with `ValueFor<T>(fieldDefinition)`.
 
-## Indexing Converter Contract
+## Filtering, sorting, facets, and boosts
 
-Implement `IIndexingConverter` and include DI attribute (`[Service]`, etc.).
-Analyzer `ILUS0001` enforces registration attributes for concrete converters.
+### Filtering
 
-Guidelines:
-- expose fields via `IndexFieldDefinitionFactory`
-- keep field names stable and explicit
-- use multi-language field semantics when needed
-- add computed fields in `AddContentComputedFields` / `AddMediaComputedFields`
+The helper must match the index-field type:
 
-## Language / Multi-language Rules
+```csharp
+// Scalar field, e.g. IndexFieldDefinition<string> or IndexFieldDefinition<int>
+ISearchFilter.FilterFor(ProductFields.Status, "published");
 
-- `LanguageIsoCode` in queries is normalized/resolved by internal language services.
-- Many built-in fields have language-variant expansions.
-- Use `LanguageInvariantFieldName(...)` when constructing low-level field-aware custom logic.
+// Collection field, e.g. IndexFieldDefinition<List<string>> or string[]
+ISearchFilter.FilterForCollectionField(ProductFields.Tags, "sale");
 
-## Built-in HTTP Endpoint Surface
+// Dynamic fallback when a field is only known at runtime
+ISearchFilter.FilterFor((IIndexFieldDefinition)field, "value");
+```
 
-Minimal API helpers exist:
-- `UseSearch(...)`
-- `UseSuggestionsSearch(...)`
+- `FilterFor(...)` on a collection field triggers analyzer `ILUS0002`.
+- `FilterForCollectionField(...)` on a scalar field triggers analyzer `ILUS0003`.
+- Compose different fields with `And`, `Or`, and `Not`; do not attempt to encode unrelated field logic in one leaf.
+- Preserve the field’s underlying type. Treating numeric/date fields as tokenized strings produces backend-specific and fragile behavior.
 
-Default request DTOs:
-- `SearchRequest`
-- `SuggestionsSearchRequest`
+### Sorting, boosting, facets
 
-Unknown request fields are ignored by default mapper.
+- Sort using `ISearchOrdering.ByScore(...)` or `ISearchOrdering.ByField(...)`. A sort field must have been declared sortable.
+- Add `FacetOn` only for fields declared facetable. Facets are not a substitute for arbitrary group-by behavior.
+- Use `ExtraBoostingOptions` for explicit relevance policy (field + value + boost). Confirm that the chosen behavior is meaningful on the selected engine.
+- Suggestions use `SuggestionSettings` and follow the same index and language rules as normal search.
 
-## Search Result Models
+## Implement custom indexing
 
-- `CommonSearchItemModel` is the default pragmatic model.
-- For custom models, inherit from `SearchResultModelBase` and use `ValueFor<T>(fieldDefinition)`.
+Implement `IIndexingConverter` in the consuming application. A concrete implementation must carry a supported DI registration attribute so it is discovered:
 
-## Vector/Hybrid Subsystem (Azure Only)
+```csharp
+[Service]
+public sealed class ProductIndexingConverter : IIndexingConverter
+{
+    public IEnumerable<IIndexFieldDefinition> GetIndexFieldDefinitions() =>
+        [ProductFields.Sku, ProductFields.Tags];
 
-Use only when `Azure.UseHybridSearch=true`.
+    public void AddContentComputedFields(
+        IPublishedContent? content,
+        IndexingModel item,
+        IndexingItemContext context)
+    {
+        item.SetOrOverrideComputedValue(ProductFields.Sku, content?.Value<string>("sku") ?? string.Empty);
+        item.SetComputedValue(ProductFields.Tags, content?.Value<IEnumerable<string>>("tags")?.ToArray() ?? []);
+    }
 
-Public vector content methods:
-- `SetVectorContent(...)`
-- `SetVectorContentPrecise(...)`
-- `SetVectorContentPreciseManual(min,max,overlap)`
+    public void AddMediaComputedFields(
+        IPublishedContent? media,
+        IndexingModel item,
+        IndexingItemContext context)
+    {
+        // Add media fields only when this feature needs them.
+    }
+}
+```
 
-Behavior:
-- average vector is the baseline
-- chunk vectors require `UseGranularHybridSearch=true`
-- if precise content is absent, chunk flow reuses `SetVectorContent(...)` content
-- background mode (`GranularHybridBackgroundEmbedding=true`) makes chunk indexing eventually consistent
+Define public fields with `IndexFieldDefinitionFactory`, not raw field-name strings:
 
-Quota and chunking:
-- chunk vectors are capped effectively to Azure multi-vector quota (100)
-- system auto-adjusts chunk size upward if config would exceed quota and logs warning
+```csharp
+public static class ProductFields
+{
+    public static readonly IndexFieldDefinition<string> Sku =
+        IndexFieldDefinitionFactory.ForString("productSku", isRaw: true, isSortable: true);
 
-## Common Failure Modes Agents Should Check First
+    public static readonly IndexFieldDefinition<string[]> Tags =
+        IndexFieldDefinitionFactory.ForStringArray("productTags", isFacetable: true, isRaw: true);
+}
+```
 
-1. Wrong index name / missing configured index.
-2. Feature mismatch (code assumes Azure but Lucene feature enabled).
-3. Missing DI attribute on converter (analyzer failure).
-4. Wrong filter helper (`FilterFor` vs `FilterForCollectionField`).
-5. Hybrid enabled but missing OpenAI settings.
-6. Live test in-memory DB misconfigured with non-shared DB names across scopes.
+Implementation rules:
 
-## High-Value Files To Inspect During Debugging
+- `GetIndexFieldDefinitions()` declares the schema contract. Register every field that queries/results/facets use.
+- `RunForIndexes()` may limit a converter to particular index names. An empty list means all relevant indexes.
+- `Order` controls converter layering. Use it only when an override order is intentional and documented in the application.
+- `SetComputedValue` preserves an existing value; `SetOrOverrideComputedValue` intentionally wins. Choose based on feature ownership.
+- Keep field names, generic types, collection/scalar shape, raw/tokenized mode, sorting, faceting, and language variance stable. Any change requires a compatible migration/reindex plan and query review.
+- Analyzer `ILUS0001` reports concrete converters without the necessary DI registration attribute.
 
-- `src/UmbracoSearch/Search/Common/SearchInitialization.cs`
-- `src/UmbracoSearch/Search/Orchestration/OrchestrationService.cs`
-- `src/UmbracoSearch/Search/Common/SearchRequestNormalizer.cs`
-- `src/UmbracoSearch/Search/Services/Common/SearchServiceBase.cs`
-- `src/UmbracoSearch/Search/Services/Lucene/LuceneSearchService.cs`
-- `src/UmbracoSearch/Search/Services/Azure/AzureSearchService.cs`
-- `src/UmbracoSearch/Search/Indexing/Common/Factories/IndexFieldDefinitionFactory.cs`
-- `src/UmbracoSearch/Search/Indexing/IndexingConstants.cs`
+## Language-aware data
 
-## Agent Workflow Recommendation
+- Mark a field multi-language when values truly vary per culture. The package expands it into culture-specific fields during indexing.
+- Query with `SearchParameters.LanguageIsoCode`; do not manually append culture strings to field names.
+- In advanced field-aware code, use the field definition’s `LanguageInvariantFieldName(...)` helper rather than constructing names manually.
+- Test the default culture and at least one non-default culture for every multi-language search feature: population, full text, filters, facets, and result projection as applicable.
 
-1. Start with non-vector full-text + filters + sorting + facets.
-2. Add taxonomy indexing/facets when tag-based classification is needed:
-   - flat tags are supported
-   - hierarchical taxonomy paths are also supported
-3. Add boosts and language behavior.
-4. Add hybrid vectors only when relevance needs semantic lift.
-5. Add granular/background vector mode only after baseline search behavior is stable.
+## Taxonomy
+
+Use taxonomy when a value has meaningful hierarchy, not for generic flat labels:
+
+```csharp
+item.AddTaxonomyValue("Category", "SubCategory", "Tag");
+```
+
+This stores the complete path in `TaxonomyTags` (`Category__SubCategory__Tag`) and category paths in `TaxonomyCategories` (`Category__SubCategory`).
+
+- Facet on `TaxonomyTags` to obtain tag values.
+- Filter `TaxonomyCategories` to drill down through category levels.
+- With both `EnableTaxonomyFacetExpansion` and `EnableTaxonomyFiltersExpansion` enabled, render the hierarchical `Facet.Values` / nested `FacetOption.Values` structure and use `ChildFacetsIndexFieldName` for the next level.
+- Under those same settings, an `OR` filter spanning different taxonomy branches is regrouped by category path. Do not duplicate that normalization in UI/controller code.
+- Custom taxonomy fields are supported when the application needs separate taxonomy domains.
+
+## Azure, hybrid, and chunk vectors
+
+Use Azure only when its operational requirements are available: service credentials, a managed-index allow-list, lifecycle ownership, and monitoring.
+
+### Azure lifecycle
+
+- The package may provision/rebuild Azure equivalents only for names in `SearchSettings.Indexes`.
+- `CustomIndexSuffix` and optional blue/green naming are managed internally. Do not derive or swap physical index names in application search code.
+- When `EnableBlueGreenIndexing` is on, rebuilds may create the alternate index, switch active search/indexing clients, and delete the inactive index after a successful swap. Build a recovery/observability plan before enabling it.
+- `ReadOnly` application nodes must not execute write/rebuild flows.
+- For preview indexes, keep exclusion semantics correct for both base and language-specific fields.
+
+### Hybrid vectors
+
+Enable only after conventional search works:
+
+1. Register `SearchOptions.Azure`.
+2. Configure Azure credentials, `OpenAi` embedding settings, and `Azure.UseHybridSearch=true`.
+3. Request hybrid search with `new FullTextSearch(query, useHybridSearch: true)` where appropriate.
+4. In an indexing converter, set source text with `item.SetVectorContent(content)`.
+
+For chunk-level vectors, set `Azure.UseChunkedVectorSearch=true` and optionally provide a different source/chunking policy:
+
+```csharp
+item.SetVectorContent("short searchable summary");
+item.SetVectorContentPrecise("long form content for chunk matching");
+// Or choose per-item bounds:
+item.SetVectorContentPreciseManual(content, minTokens: 1000, maxTokens: 2000, overlapTokens: 150);
+```
+
+Vector behavior:
+
+- Average vectors are the baseline. Precise chunk content falls back to the average content, then normal search content, when omitted.
+- Azure multi-vector quota limits chunks (effectively 100); the package may increase chunk size and log a warning.
+- `BackgroundEmbeddingsProcessing=true` queues average and chunk generation durably. Results are eventually consistent: an immediately published document may not yet participate in vector matching.
+- If changing vector persistence from the consuming application, use the package’s supported persistence configuration and apply EF Core migrations through the application’s normal deployment process. Do not delete embedding data to “fix” a relevance issue.
+
+## Optional HTTP endpoints
+
+The package can map minimal APIs:
+
+```csharp
+app.UseSearch();
+app.UseSuggestionsSearch();
+```
+
+Default paths are `/api/search` and `/api/search/suggest`. Options can change the path, constrain/map request parameters, or customize output:
+
+```csharp
+app.UseSearch(options =>
+{
+    options.Path = "/api/site-search";
+    options.SearchParametersOverride = static (_, _, parameters, _) =>
+    {
+        parameters.Aliases = ["contentPage"];
+        parameters.Take = Math.Min(parameters.Take, 50);
+        return ValueTask.FromResult(parameters);
+    };
+});
+```
+
+Unknown fields in the built-in request mapper are ignored. That is not validation: validate and cap untrusted public inputs in the consuming application. Add authentication/authorization, rate limiting, caching, and tenant restrictions there as well.
+
+## Optional MCP tools
+
+Expose search to an MCP client using either:
+
+```csharp
+builder.Services.AddUmbracoSearchMcpTools().WithHttpTransport();
+// or add package tools to an existing MCP builder:
+builder.Services.AddMcpServer().WithHttpTransport().WithUmbracoSearchTools();
+app.MapMcp("/searchMcp");
+```
+
+The package tools are `fetchAvailableIndexes` and `search`. Default MCP `search` accepts `(indexName, q, top_k)`, clamps `top_k` to `1..50`, and returns common search-item data. Configure `McpSearchOptions` to constrain the default query or map result data; replace/decorate `IUmbracoSearchMcpService` for an intentionally different contract.
+
+MCP transport, authentication, authorization, client identity, rate limits, and exposure of index names remain application responsibilities.
+
+## Troubleshooting sequence
+
+1. Confirm the enabled feature matches the intended engine.
+2. Check application startup logs and license configuration.
+3. Confirm `DefaultIndexName`, request `IndexName`, and `Indexes` all match existing Umbraco indexes exactly.
+4. Check the requested content is actually published/indexed and that a custom converter is DI-discovered.
+5. Validate field declaration versus usage: scalar/collection, correct generic type, facetable/sortable/raw/multi-language settings.
+6. Check culture resolution and indexed values for the requested language.
+7. For empty taxonomy results, check whether filtering tags versus category paths and whether expansion flags match UI expectations.
+8. For Azure, check `ReadOnly`, managed-index allow-list, service credentials, server role, suffix/blue-green configuration, and batch logs.
+9. For hybrid results, check both `UseHybridSearch` and OpenAI settings, then distinguish missing source text from asynchronous background embedding delay.
+10. For an endpoint/MCP issue, inspect application-owned mapping overrides, authorization, limits, and request validation before assuming a package issue.
+
+## Definition of done for a consumer feature
+
+- The chosen engine supports every advertised feature.
+- The app registers the correct feature and has valid, secret-managed configuration.
+- Custom fields have typed definitions, a registered converter, correct population, and queries that match their shape.
+- Default index and explicit index paths are tested.
+- Language-aware behavior is tested for default and non-default culture where used.
+- Filter, facet, sort, and result-model behavior are exercised against representative content.
+- Azure lifecycle constraints and vector consistency expectations are represented in operations/tests when Azure is enabled.
+- Public HTTP/MCP surfaces impose app-owned authorization, rate and pagination limits, and input constraints.
+- Consumer-facing examples/configuration are kept with the application and aligned to the installed package version.
