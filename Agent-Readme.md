@@ -21,7 +21,7 @@ The main runtime service is `ISearchService`. The main customization seam is `II
 - Register **one appropriate engine feature**: `SearchOptions.Lucene` or `SearchOptions.Azure`.
 - `SearchSettings.Indexes` contains the real Umbraco indexes this package may manage. In Azure mode it is also the lifecycle allow-list: do not configure or expect the package to provision/rebuild unrelated indexes.
 - `DefaultIndexName` is used whenever a request omits `IndexName`.
-- Invalid `LicenseToken` fails initialization. Treat it as a startup/configuration issue, never as a query error to suppress.
+- Azure requires a valid `LicenseToken` and fails initialization when it is invalid. Lucene does not require a license token.
 - An absent or misspelled configured index can result in a logged error and empty results rather than an obvious startup failure. Include this in operational tests.
 - Use typed index fields and typed filter helpers. The shape of an indexed field (scalar vs collection, multi-language, facetable/sortable) is part of the query contract.
 - Do not rely on Lucene for hybrid/vector behavior; those are Azure-only capabilities.
@@ -48,7 +48,7 @@ Place this under `SearchSettings` in application configuration. Keep tokens/keys
 
 ```json
 "SearchSettings": {
-  "LicenseToken": "<license-token>",
+  "LicenseToken": "<license-token-required-for-azure>",
   "DefaultIndexName": "ExternalIndex",
   "Indexes": ["ExternalIndex", "InternalIndex"],
   "PreviewIndexes": ["InternalIndex"],
