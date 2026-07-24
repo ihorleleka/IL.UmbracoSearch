@@ -39,6 +39,7 @@ A comprehensive search solution for Umbraco, supporting both Lucene and Azure Se
 - **Hybrid search (Azure only):** Combine keyword search with vector search for more relevant results.
 - **Granular hybrid search (Azure only):** Optionally store chunk-level vectors per item (multi-vector field) for finer vector matching.
 - **Extensible:** Add your own custom fields to the search index.
+- **Optional Search Insights:** On Umbraco 17, install `IL.UmbracoSearch.Analytics` and add `SearchOptions.Analytics` alongside exactly one engine to capture search and consented click metrics. See the analytics package README for SQL setup, the backoffice Search section, Azure-only synonyms, and the npm click helper.
 
 ## Quick Start
 
