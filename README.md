@@ -8,6 +8,7 @@ A comprehensive search solution for Umbraco, supporting both Lucene and Azure Se
 - [IL.UmbracoSearch](#ilumbracosearch)
   - [Table of Contents](#table-of-contents)
   - [Features](#features)
+  - [Optional Search Insights Setup (Umbraco 17)](#optional-search-insights-setup-umbraco-17)
   - [Quick Start](#quick-start)
   - [Configuration](#configuration)
     - [1. Service Registration](#1-service-registration)
@@ -40,6 +41,30 @@ A comprehensive search solution for Umbraco, supporting both Lucene and Azure Se
 - **Granular hybrid search (Azure only):** Optionally store chunk-level vectors per item (multi-vector field) for finer vector matching.
 - **Extensible:** Add your own custom fields to the search index.
 - **Optional Search Insights:** On Umbraco 17, install `IL.UmbracoSearch.Analytics` and add `SearchOptions.Analytics` alongside exactly one engine to capture search and consented click metrics. See the analytics package README for SQL setup, the backoffice Search section, Azure-only synonyms, and the npm click helper.
+
+## Optional Search Insights Setup (Umbraco 17)
+
+For projects using Search Insights:
+
+1. Install `IL.UmbracoSearch.Analytics`.
+2. Enable analytics with one engine:
+
+```csharp
+builder.Services.AddUmbracoSearch(SearchOptions.Lucene | SearchOptions.Analytics);
+// or
+builder.Services.AddUmbracoSearch(SearchOptions.Azure | SearchOptions.Analytics);
+```
+
+3. Map analytics endpoints in your app startup:
+
+```csharp
+app.UseSearchAnalyticsClicks();
+app.MapSearchAnalyticsManagement(authorizationPolicy: "SearchInsights");
+```
+
+4. In your front end, use the npm package `@ihorleleka/umbraco-search-analytics` to post consented clicks using the search response `trackingReference`.
+
+Important SSR/hydration note: `trackingReference` is generated per executed search call. If your app performs the same search during SSR and then executes it again during hydration, analytics will count both. Reuse SSR search data on hydration to avoid duplicate analytics. For non-user-visible/system calls, set `SearchParameters.CaptureAnalytics = false` (or `SearchRequest.CaptureAnalytics = false` when using the built-in search endpoint).
 
 ## Quick Start
 
@@ -327,6 +352,7 @@ This object allows you to define your query:
 - **IndexName:** Specify which index to search.
 - **Root:** Restrict the search to a subtree by node ID or node key.
 - **LanguageIsoCode:** The culture to search in.
+- **CaptureAnalytics:** Defaults to true. Set false to skip optional analytics capture for that call.
 - **EngineSpecific:** Optional escape hatch for engine-specific request customization right before execution.
 
 Example:
