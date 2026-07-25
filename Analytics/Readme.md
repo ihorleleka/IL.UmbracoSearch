@@ -1,8 +1,11 @@
 # IL.UmbracoSearch.Analytics
 
 Optional Search Insights for IL.UmbracoSearch. This package targets **Umbraco
-17 / .NET 10 only**. Install it and enable `SearchOptions.Analytics` together
-with exactly one search engine.
+17 / .NET 10 only**.
+
+## Enable Analytics
+
+Enable `SearchOptions.Analytics` with exactly one engine:
 
 ```csharp
 builder.Services.AddUmbracoSearch(SearchOptions.Lucene | SearchOptions.Analytics);
@@ -10,20 +13,26 @@ builder.Services.AddUmbracoSearch(SearchOptions.Lucene | SearchOptions.Analytics
 builder.Services.AddUmbracoSearch(SearchOptions.Azure | SearchOptions.Analytics);
 ```
 
-Analytics decorates `ISearchService`; it does not change its query or result
-semantics. Completed searches receive a `TrackingReference` and are captured
-through a bounded in-process queue, so persistence errors never fail a search.
-Only GUID `UmbracoNodeKey` values are stored for impressions and clicks.
+Analytics decorates `ISearchService`; it does not change query/result semantics.
+Completed searches may receive a `TrackingReference`. Capture is non-blocking and
+stores only GUID `UmbracoNodeKey` values for impressions/clicks.
 
-## Storage and privacy
+Per-call capture opt-out is available through `SearchParameters.CaptureAnalytics`.
+Set it to `false` on individual searches that must not be captured (for example,
+server-generated/internal searches).
 
-SQL Server is the default provider. Set `ConnectionStrings:UmbracoSearchAnalytics`
-to use a separate database; otherwise the package uses Umbraco's `umbracoDbDSN`.
-`UseInMemoryStorage` is solely for tests/local experiments. Configure a custom
-`IAnalyticsStore`, `IAnalyticsSanitizer`, or `IAnalyticsConsentProvider` to
-replace the defaults. Raw events are retained for 90 days by default; query text
-can be disabled with `CaptureQueryText`. Do not store an IP address or a user
-name in custom implementations; search text may itself contain personal data.
+## Consumer setup checklist
+
+1. Enable Analytics with exactly one engine.
+2. Configure analytics storage.
+3. Map click tracking endpoint (`UseSearchAnalyticsClicks`).
+4. Map backoffice management endpoints (`MapSearchAnalyticsManagement`).
+5. Apply a backoffice authorization policy for Search Insights access.
+6. Install and use the npm click helper package in your front end.
+
+## Configuration
+
+The package binds options from `UmbracoSearch:Analytics`.
 
 ```json
 {
@@ -32,73 +41,143 @@ name in custom implementations; search text may itself contain personal data.
   },
   "UmbracoSearch": {
     "Analytics": {
-      "RawEventRetention": "90.00:00:00",
+      "Enabled": true,
       "CaptureQueryText": true,
-      "EnableAzureTelemetry": false
+      "QueueCapacity": 2000,
+      "FlushInterval": "00:00:01",
+      "TrackingReferenceLifetime": "01:00:00",
+      "RawEventRetention": "90.00:00:00",
+      "EnableAzureTelemetry": false,
+      "AzureTelemetryImportInterval": "00:05:00",
+      "SynonymFieldNames": ["searchTitle"]
     }
   }
 }
 ```
 
+Supported `UmbracoSearch:Analytics` options:
+
+- `Enabled`
+- `CaptureQueryText`
+- `QueueCapacity`
+- `FlushInterval`
+- `TrackingReferenceLifetime`
+- `RawEventRetention`
+- `ConnectionString` (explicit override)
+- `UseInMemoryStorage` (tests/local experiments only)
+- `EnableAzureTelemetry`
+- `AzureTelemetryImportInterval`
+- `SynonymFieldNames`
+
+`CaptureAnalytics` is not an appsetting; it is a per-request flag on
+`SearchParameters` (and the default HTTP `SearchRequest`) for selective capture.
+
+Storage defaults:
+
+- SQL Server is default.
+- Connection resolution order:
+  1. `UmbracoSearch:Analytics:ConnectionString`
+  2. `ConnectionStrings:UmbracoSearchAnalytics`
+  3. `ConnectionStrings:umbracoDbDSN`
+- If none are set, startup fails unless `UseInMemoryStorage=true`.
+
 ## Database migrations
 
-Analytics schema changes are generated only with the EF `dotnet` tool. The
-`Microsoft.EntityFrameworkCore.Design` references are deliberately commented
-out in the package project: temporarily enable the matching target-framework
-reference, run `dotnet ef migrations add <Name> --framework net10.0` (and
-`dotnet ef database update --framework net10.0` where appropriate), then
-comment the reference again before packaging. Do not hand-author migration
-files. The package uses its own EF migrations history table, so analytics
-migrations do not share Umbraco's history.
+Generate analytics migrations with EF tooling (`dotnet ef`); do not hand-author
+migration files. Analytics uses its own migrations history table and does not
+modify Umbraco tables.
 
-Before updating a production schema, take the normal SQL backup and run the
-migration against a staging copy. Analytics records are disposable according to
-the configured retention policy; the package does not modify Umbraco tables.
+## Click endpoint and npm helper
 
-Map the consumer-owned click endpoint explicitly:
+Map the consumer-owned click endpoint:
 
 ```csharp
 app.UseSearchAnalyticsClicks();
 ```
 
-The host remains responsible for endpoint authentication, rate limiting, and
-consent. The npm helper is published as `@ihorleleka/umbraco-search-analytics` and
-posts `{ trackingReference, nodeKey, position, idempotencyKey }` only when the
-consumer-supplied consent callback returns true.
+Default path: `/api/search/analytics/click`
+
+Install helper package:
+
+```bash
+npm i @ihorleleka/umbraco-search-analytics
+```
+
+Use the helper:
 
 ```ts
 import { trackSearchResultClick } from '@ihorleleka/umbraco-search-analytics';
 
 await trackSearchResultClick(
   { endpoint: '/api/search/analytics/click', consent: () => hasAnalyticsConsent() },
-  { trackingReference: search.trackingReference, nodeKey: item.nodeKey, position: index + 1, idempotencyKey: crypto.randomUUID() });
+  {
+    trackingReference: search.trackingReference,
+    nodeKey: item.nodeKey,
+    position: index + 1,
+    idempotencyKey: crypto.randomUUID()
+  });
 ```
 
-`nodeKey` must be the Umbraco content GUID—not a numeric node ID. Expired,
-unknown, duplicate, or non-displayed click events are safely rejected.
+Click payload:
 
-Map the backoffice management routes separately. They require an authenticated
-user by default; pass the host's backoffice Search policy to restrict access to
-the appropriate Umbraco user groups:
+- `trackingReference`: from the search response
+- `nodeKey`: Umbraco content GUID (not numeric node ID)
+- `position`: 1-based position shown to the user
+- `idempotencyKey`: unique per click attempt
+
+Endpoint outcomes:
+
+- `202 Accepted` for accepted click
+- `204 No Content` for duplicate click
+- `400 Bad Request` for invalid/expired/non-displayed click
+
+The host owns endpoint authentication, transport security, rate limiting, and consent policy.
+
+## Backoffice management endpoints
+
+Map Search Insights management endpoints:
 
 ```csharp
 app.MapSearchAnalyticsManagement(authorizationPolicy: "SearchInsights");
 ```
 
+Default base path: `/umbraco/api/search-analytics`
+
+If no policy is supplied, endpoints still require an authenticated Umbraco
+backoffice user via `BackOfficeAuthenticationType`.
+
+Example policy wiring:
+
+```csharp
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("SearchInsights", policy =>
+        policy.AddAuthenticationSchemes(Constants.Security.BackOfficeAuthenticationType)
+              .RequireAuthenticatedUser());
+});
+```
+
+## SSR and hydration guidance
+
+`TrackingReference` is generated per executed search call. If the same logical
+search is executed in SSR and then re-executed during hydration, analytics will
+record two executions.
+
+To avoid duplicate analytics with the current implementation, reuse SSR search
+results during hydration instead of issuing a second identical search call, or
+set `CaptureAnalytics = false` on non-user-visible/server-generated searches.
+
+You can also suppress analytics for specific replay/internal searches by setting
+`SearchParameters.CaptureAnalytics = false` for those calls.
+
 ## Azure synonyms
 
-Synonym management is Azure-only. Publication creates an immutable versioned
-Azure synonym map and refreshes the active/indexing physical index definitions;
-it never uploads or reindexes documents. A failed publication is recorded while
-the previously active map remains assigned. Configure `SynonymFieldNames` to
-select the Azure searchable fields that receive the map.
+Synonym management is Azure-only. Publication creates immutable versioned Azure
+synonym maps and refreshes active/indexing index definitions; it does not upload
+or reindex content documents.
 
 ## Azure operational telemetry
 
-Where Azure Monitor or Log Analytics already has useful Search operational
-metrics, register an `IAzureSearchTelemetryReader` and set
-`UmbracoSearch:Analytics:EnableAzureTelemetry` to `true`. The package invokes
-readers only from a background import service (every five minutes by default),
-never while serving a search. Readers use the host's existing Azure credentials
-and return aggregates, so the overview can show Azure request/failure/latency
-figures separately from interaction analytics without double counting them.
+If you provide `IAzureSearchTelemetryReader` implementations and enable
+`UmbracoSearch:Analytics:EnableAzureTelemetry`, telemetry imports run in a
+background service (default every 5 minutes), never on the request path.
