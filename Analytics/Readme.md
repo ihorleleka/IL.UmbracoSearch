@@ -32,14 +32,16 @@ server-generated/internal searches).
 
 ## Configuration
 
-The package binds options from `UmbracoSearch:Analytics`.
+The package binds options from `SearchSettings:Analytics`.
+For backward compatibility, `UmbracoSearch:Analytics` is also accepted when
+`SearchSettings:Analytics` is not present.
 
 ```json
 {
   "ConnectionStrings": {
     "UmbracoSearchAnalytics": "Server=...;Database=SearchAnalytics;..."
   },
-  "UmbracoSearch": {
+  "SearchSettings": {
     "Analytics": {
       "Enabled": true,
       "EnableBackgroundProcessing": true,
@@ -56,7 +58,7 @@ The package binds options from `UmbracoSearch:Analytics`.
 }
 ```
 
-Supported `UmbracoSearch:Analytics` options:
+Supported `SearchSettings:Analytics` options:
 
 - `Enabled` — set to `false` on preview/test servers to disable all capture on that node
 - `EnableBackgroundProcessing` — set to `false` on delivery servers in a multi-server setup so only the designated master backend runs periodic tasks (retention purge, Azure telemetry import); capture and ingestion are unaffected
@@ -78,7 +80,7 @@ Storage defaults:
 
 - SQL Server is default.
 - Connection resolution order:
-  1. `UmbracoSearch:Analytics:ConnectionString`
+  1. `SearchSettings:Analytics:ConnectionString`
   2. `ConnectionStrings:UmbracoSearchAnalytics`
   3. `ConnectionStrings:umbracoDbDSN`
 - If none are set, startup fails unless `UseInMemoryStorage=true`.
@@ -191,7 +193,7 @@ Example delivery server appsettings:
 
 ```json
 {
-  "UmbracoSearch": {
+  "SearchSettings": {
     "Analytics": {
       "EnableBackgroundProcessing": false
     }
@@ -203,7 +205,7 @@ Example preview/test server appsettings:
 
 ```json
 {
-  "UmbracoSearch": {
+  "SearchSettings": {
     "Analytics": {
       "Enabled": false
     }
@@ -230,5 +232,5 @@ or reindex content documents.
 ## Azure operational telemetry
 
 If you provide `IAzureSearchTelemetryReader` implementations and enable
-`UmbracoSearch:Analytics:EnableAzureTelemetry`, telemetry imports run in a
+`SearchSettings:Analytics:EnableAzureTelemetry`, telemetry imports run in a
 background service (default every 5 minutes), never on the request path.
