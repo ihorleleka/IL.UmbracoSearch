@@ -42,6 +42,7 @@ The package binds options from `UmbracoSearch:Analytics`.
   "UmbracoSearch": {
     "Analytics": {
       "Enabled": true,
+      "EnableBackgroundProcessing": true,
       "CaptureQueryText": true,
       "QueueCapacity": 2000,
       "FlushInterval": "00:00:01",
@@ -57,7 +58,8 @@ The package binds options from `UmbracoSearch:Analytics`.
 
 Supported `UmbracoSearch:Analytics` options:
 
-- `Enabled`
+- `Enabled` — set to `false` on preview/test servers to disable all capture on that node
+- `EnableBackgroundProcessing` — set to `false` on delivery servers in a multi-server setup so only the designated master backend runs periodic tasks (retention purge, Azure telemetry import); capture and ingestion are unaffected
 - `CaptureQueryText`
 - `QueueCapacity`
 - `FlushInterval`
@@ -169,6 +171,55 @@ set `CaptureAnalytics = false` on non-user-visible/server-generated searches.
 
 You can also suppress analytics for specific replay/internal searches by setting
 `SearchParameters.CaptureAnalytics = false` for those calls.
+
+## Multi-server deployments
+
+In a load-balanced or multi-server setup, use `Enabled` and `EnableBackgroundProcessing`
+to control per-node behaviour:
+
+| Node type | `Enabled` | `EnableBackgroundProcessing` | What runs |
+|---|---|---|---|
+| Master / backoffice server | `true` (default) | `true` (default) | Migrations, retention, telemetry import, capture |
+| Delivery server | `true` (default) | `false` | Capture only |
+| Preview / test server | `false` | *(irrelevant)* | Nothing |
+
+`EnableBackgroundProcessing = false` skips **all** server-side processing on that node:
+database migrations, retention purge, and Azure telemetry import. Only the master
+(backoffice) server should run with it set to `true`.
+
+Example delivery server appsettings:
+
+```json
+{
+  "UmbracoSearch": {
+    "Analytics": {
+      "EnableBackgroundProcessing": false
+    }
+  }
+}
+```
+
+Example preview/test server appsettings:
+
+```json
+{
+  "UmbracoSearch": {
+    "Analytics": {
+      "Enabled": false
+    }
+  }
+}
+```
+
+## Safety when the feature is not activated
+
+If `IL.UmbracoSearch.Analytics` is referenced but `SearchOptions.Analytics` is
+never added during service registration, the package is inert:
+
+- The database migration hosted service exits without running.
+- No background workers start (capture queue, retention, Azure telemetry).
+- `UseSearchAnalyticsClicks()` and `MapSearchAnalyticsManagement()` map no
+  routes and resolve nothing from the DI container.
 
 ## Azure synonyms
 
