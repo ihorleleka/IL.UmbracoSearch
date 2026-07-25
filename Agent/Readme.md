@@ -79,6 +79,18 @@ Place this under `SearchSettings` in application configuration. Keep tokens/keys
     "ServiceUrl": "<embedding-service-url>",
     "ApiKey": "<embedding-service-key>",
     "EmbeddingsDeploymentName": "text-embedding-3-large"
+  },
+  "Analytics": {
+    "Enabled": true,
+    "EnableBackgroundProcessing": true,
+    "CaptureQueryText": true,
+    "QueueCapacity": 2000,
+    "FlushInterval": "00:00:01",
+    "TrackingReferenceLifetime": "01:00:00",
+    "RawEventRetention": "90.00:00:00",
+    "EnableAzureTelemetry": false,
+    "AzureTelemetryImportInterval": "00:05:00",
+    "SynonymFieldNames": ["searchTitle"]
   }
 }
 ```
@@ -94,6 +106,7 @@ Place this under `SearchSettings` in application configuration. Keep tokens/keys
 | Taxonomy expansion flags | Opt into hierarchical taxonomy facets and compatible taxonomy `OR` filter rewriting. |
 | `Azure.*` | Required Azure connection and throughput/vector settings when Azure feature is selected. |
 | `OpenAi.*` | Required for generated embeddings when hybrid search is enabled. |
+| `Analytics.*` | Optional Search Insights settings used when `SearchOptions.Analytics` is enabled. |
 
 `ReadOnly`, server role, and `Indexes` are hard safety constraints for Azure operations. A search feature must not attempt to work around them.
 
