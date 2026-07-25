@@ -64,6 +64,25 @@ app.MapSearchAnalyticsManagement(authorizationPolicy: "SearchInsights");
 
 4. In your front end, use the npm package `@ihorleleka/umbraco-search-analytics` to post consented clicks using the search response `trackingReference`.
 
+5. Configure Search Insights under `SearchSettings:Analytics`:
+
+```json
+"SearchSettings": {
+  "Analytics": {
+    "Enabled": true,
+    "EnableBackgroundProcessing": true,
+    "CaptureQueryText": true,
+    "QueueCapacity": 2000,
+    "FlushInterval": "00:00:01",
+    "TrackingReferenceLifetime": "01:00:00",
+    "RawEventRetention": "90.00:00:00",
+    "EnableAzureTelemetry": false,
+    "AzureTelemetryImportInterval": "00:05:00",
+    "SynonymFieldNames": ["searchTitle"]
+  }
+}
+```
+
 Important SSR/hydration note: `trackingReference` is generated per executed search call. If your app performs the same search during SSR and then executes it again during hydration, analytics will count both. Reuse SSR search data on hydration to avoid duplicate analytics. For non-user-visible/system calls, set `SearchParameters.CaptureAnalytics = false` (or `SearchRequest.CaptureAnalytics = false` when using the built-in search endpoint).
 
 ## Quick Start
@@ -186,6 +205,7 @@ Add a `SearchSettings` section to your `appsettings.json`.
 - **Azure.DocumentBatchQueueCapacity:** Maximum accepted-but-not-yet-sent document writes. When full, indexing waits for capacity instead of creating unbounded in-memory work. Defaults to `2000`.
 - **Azure.DocumentBatchMaxRetries:** Retry limit for transient Azure indexing failures (`408`, `429`, and `5xx`). Defaults to `3`; permanent action failures are logged and reported by rebuild flush.
 - **Azure.BackgroundEmbeddingsMaxConcurrency:** Maximum number of independent durable vector jobs processed concurrently. Defaults to `4`.
+- **Analytics:** Optional Search Insights settings under `SearchSettings:Analytics` when `SearchOptions.Analytics` is enabled (see `src/UmbracoSearch.Analytics/README.md` for full options and behavior).
 - **ReadOnly:** Disallows runtime to create or modify existing index in any way.
 - **EnableBlueGreenIndexing:** Allows to enable b/g indexing behavior when rebuilding index, so that old functional index temporary remains available for search operations.
 - **DisableSwapDelay:** System will delay index swap to allow for indexing to be finalized (1 min per 1000 items of delay); you can disable this behavior with this flag (probably for dev/test purpose).
