@@ -88,8 +88,6 @@ Place this under `SearchSettings` in application configuration. Keep tokens/keys
     "FlushInterval": "00:00:01",
     "TrackingReferenceLifetime": "01:00:00",
     "RawEventRetention": "90.00:00:00",
-    "EnableAzureTelemetry": false,
-    "AzureTelemetryImportInterval": "00:05:00",
     "SynonymFieldNames": ["searchTitle"]
   }
 }
