@@ -242,30 +242,3 @@ never added during service registration, the package is inert:
 Synonym management is Azure-only. Publication creates immutable versioned Azure
 synonym maps and refreshes active/indexing index definitions; it does not upload
 or reindex content documents.
-
-## Local Storybook preview for Search section FE
-
-Use the local Storybook workspace to evolve Search-section UI and fake-data
-states without publishing a new package release.
-
-Workspace path:
-
-- `src/UmbracoSearch.Analytics.Storybook/`
-
-Run locally:
-
-```bash
-cd src/UmbracoSearch.Analytics.Storybook
-npm install
-npm run storybook
-```
-
-Build preview artifacts:
-
-```bash
-npm run build-storybook
-```
-
-The preview uses a Storybook-only fake-data provider. Runtime backoffice
-behavior remains unchanged: production continues to use authenticated Umbraco
-fetch flow and existing management endpoints.
