@@ -239,6 +239,14 @@ never added during service registration, the package is inert:
 
 ## Azure synonyms
 
-Synonym management is Azure-only. Publication creates immutable versioned Azure
-synonym maps and refreshes active/indexing index definitions; it does not upload
-or reindex content documents.
+Synonym management is Azure-only. Every publication removes Azure synonym maps
+whose names start with `Analytics:SynonymMapPrefix` (default `us-`), creates the
+single shared `${SynonymMapPrefix}library-managed-all` map from the current
+enabled mappings, and refreshes managed active/indexing index definitions. It
+does not upload or reindex content documents. Set distinct prefixes such as
+`staging-us-` and `production-us-` when environments share an Azure Search
+service.
+
+The preview uses a Storybook-only fake-data provider. Runtime backoffice
+behavior remains unchanged: production continues to use authenticated Umbraco
+fetch flow and existing management endpoints.
