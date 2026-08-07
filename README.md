@@ -710,6 +710,25 @@ A class implementing this interface allows you to:
 - **`AddMediaComputedFields(..., IndexingItemContext context)`**: Do the same for media items.
 - **`RunForIndexes()`**: Specify which indexes the converter should run for.
 
+### The `IExternalIndexingConverter` Interface
+
+Use this interface when indexing data that does not come from `IPublishedContent` (for example, external systems or pre-aggregated records):
+
+- **`GetIndexFieldDefinitions()`**: Define external fields for both Lucene and Azure schemas.
+- **`GetIndexingModels(IndexingItemContext context)`**: Return a list of `ExternalIndexingModel` documents that should be indexed during rebuild.
+- **`RunForIndexes()`**: Limit execution to specific configured indexes.
+
+These converters are executed during configured index rebuilds for both Lucene and Azure flows.
+
+`ExternalIndexingModel` requires 3 mandatory fields:
+- `nodeId`
+- `nodeName`
+- `computedExcludedFromSearch`
+
+Embedding wiring:
+- If your external model sets vector content (`SetVectorContent`, `SetVectorContentPrecise`, `SetVectorContentPreciseManual`) and Azure embeddings are enabled, vectors are generated during rebuild (when background embeddings are disabled).
+- When background embeddings are enabled, external models still flow through Azure indexing and can be picked up by the background embedding queue via deterministic node key generation.
+
 ### Defining Index Fields
 
 Create field definitions with `IndexFieldDefinitionFactory` and group them in a static constants class.
