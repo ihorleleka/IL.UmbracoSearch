@@ -4,7 +4,7 @@
 A comprehensive search solution for Umbraco, supporting both Lucene and Azure Search, with extensible indexing and flexible search parameters.
 
 > [!WARNING]
-> **17.8.0.1 is a breaking release.** Consumer applications must target .NET 10 and Umbraco 17+. `IIndexingConverter` implementations now use `Task`-returning computed-field methods; update former synchronous implementations to the `AddContentComputedFieldsAsync` and `AddMediaComputedFieldsAsync` methods and await asynchronous work. Converters with the same `Order` run concurrently, while order groups run sequentially.
+> **17.8.0.1 is a breaking release.** Consumer applications must target .NET 10 and Umbraco 17+. `IIndexingConverter` computed-field methods and `IExternalIndexingConverter.GetIndexingModelsAsync` now return `Task`; update former synchronous implementations and await asynchronous work. Converters with the same `Order` run concurrently, while order groups run sequentially.
 
 > [!IMPORTANT]
 > `IL.UmbracoSearch` supports Umbraco 17 on .NET 10. Umbraco 13–16 and .NET 8–9 are no longer supported.
@@ -725,7 +725,7 @@ For Lucene full-text search, caller-supplied `SearchFields` are used unchanged. 
 Use this interface when indexing data that does not come from `IPublishedContent` (for example, external systems or pre-aggregated records):
 
 - **`GetIndexFieldDefinitions()`**: Define external fields for both Lucene and Azure schemas.
-- **`GetIndexingModels(IndexingItemContext context)`**: Return a list of `ExternalIndexingModel` documents that should be indexed during rebuild.
+- **`GetIndexingModelsAsync(IndexingItemContext context, CancellationToken)`**: Asynchronously return the `ExternalIndexingModel` documents to index during rebuild.
 - **`RunForIndexes()`**: Limit execution to specific configured indexes.
 
 These converters are executed during configured index rebuilds for both Lucene and Azure flows.
