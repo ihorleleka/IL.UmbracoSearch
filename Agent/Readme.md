@@ -2,6 +2,9 @@
 
 Use this file as the implementation playbook when `IL.UmbracoSearch` is installed from NuGet and source code is unavailable. It records the public configuration, extension points, behavior contracts, and troubleshooting rules needed to build a search feature in an Umbraco application.
 
+> [!IMPORTANT]
+> This guide applies to **IL.UmbracoSearch 17.8.0.1+**. This is a breaking line: applications must use .NET 10 and Umbraco 17+. Umbraco 13-16 and .NET 8-9 are unsupported. `IIndexingConverter` computed-field methods are asynchronous and return `Task`; converters in the same `Order` run concurrently, and order groups run sequentially.
+
 ## What this package is
 
 `IL.UmbracoSearch` adds a search abstraction and extensible computed indexing to **existing Umbraco/Examine indexes**. It does not create Lucene indexes. The consuming application must have real Umbraco indexes (normally `ExternalIndex`, optionally `InternalIndex`) and configure the package to use them.
@@ -25,6 +28,7 @@ The main runtime service is `ISearchService`. The main customization seam is `II
 - An absent or misspelled configured index can result in a logged error and empty results rather than an obvious startup failure. Include this in operational tests.
 - Use typed index fields and typed filter helpers. The shape of an indexed field (scalar vs collection, multi-language, facetable/sortable) is part of the query contract.
 - Do not rely on Lucene for hybrid/vector behavior; those are Azure-only capabilities.
+- For Lucene full-text requests, supplied `SearchFields` are authoritative. If omitted, only declared fields with `isSearchable: true` are searched; configure at least one searchable field.
 - The application that exposes HTTP or MCP endpoints owns authorization, authentication, rate limiting, tenancy, and public request limits.
 
 ## Install and register
@@ -204,21 +208,25 @@ public sealed class ProductIndexingConverter : IIndexingConverter
     public IEnumerable<IIndexFieldDefinition> GetIndexFieldDefinitions() =>
         [ProductFields.Sku, ProductFields.Tags];
 
-    public void AddContentComputedFields(
+    public Task AddContentComputedFieldsAsync(
         IPublishedContent? content,
         IndexingModel item,
-        IndexingItemContext context)
+        IndexingItemContext context,
+        CancellationToken cancellationToken = default)
     {
         item.SetOrOverrideComputedValue(ProductFields.Sku, content?.Value<string>("sku") ?? string.Empty);
         item.SetComputedValue(ProductFields.Tags, content?.Value<IEnumerable<string>>("tags")?.ToArray() ?? []);
+        return Task.CompletedTask;
     }
 
-    public void AddMediaComputedFields(
+    public Task AddMediaComputedFieldsAsync(
         IPublishedContent? media,
         IndexingModel item,
-        IndexingItemContext context)
+        IndexingItemContext context,
+        CancellationToken cancellationToken = default)
     {
         // Add media fields only when this feature needs them.
+        return Task.CompletedTask;
     }
 }
 ```
