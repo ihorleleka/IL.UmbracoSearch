@@ -3,7 +3,7 @@
 Use this file as the implementation playbook when `IL.UmbracoSearch` is installed from NuGet and source code is unavailable. It records the public configuration, extension points, behavior contracts, and troubleshooting rules needed to build a search feature in an Umbraco application.
 
 > [!IMPORTANT]
-> This guide applies to **IL.UmbracoSearch 17.8.0.1+**. This is a breaking line: applications must use .NET 10 and Umbraco 17+. Umbraco 13-16 and .NET 8-9 are unsupported. `IIndexingConverter` computed-field methods are asynchronous and return `Task`; converters in the same `Order` run concurrently, and order groups run sequentially.
+> This guide applies to **IL.UmbracoSearch 17.8.0.1+**. This is a breaking line: applications must use .NET 10 and Umbraco 17+. Umbraco 13-16 and .NET 8-9 are unsupported. `IIndexingConverter` computed-field methods and `IExternalIndexingConverter.GetIndexingModelsAsync` are asynchronous and return `Task`; converters in the same `Order` run concurrently, and order groups run sequentially.
 
 ## What this package is
 
