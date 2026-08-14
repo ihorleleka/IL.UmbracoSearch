@@ -3,6 +3,12 @@
 
 A comprehensive search solution for Umbraco, supporting both Lucene and Azure Search, with extensible indexing and flexible search parameters.
 
+> [!WARNING]
+> **17.8.0.1 is a breaking release.** Consumer applications must target .NET 10 and Umbraco 17+. `IIndexingConverter` implementations now use `Task`-returning computed-field methods; update former synchronous implementations to the `AddContentComputedFieldsAsync` and `AddMediaComputedFieldsAsync` methods and await asynchronous work. Converters with the same `Order` run concurrently, while order groups run sequentially.
+
+> [!IMPORTANT]
+> `IL.UmbracoSearch` supports Umbraco 17 on .NET 10. Umbraco 13–16 and .NET 8–9 are no longer supported.
+
 ## Table of Contents
 
 - [IL.UmbracoSearch](#ilumbracosearch)
@@ -706,9 +712,13 @@ You can add your own custom fields to the search index by implementing the `IInd
 A class implementing this interface allows you to:
 
 - **`GetIndexFieldDefinitions()`**: Return a collection of `IIndexFieldDefinition` objects that define your custom fields.
-- **`AddContentComputedFields(..., IndexingItemContext context)`**: Add computed values to your custom fields for each document being indexed.
-- **`AddMediaComputedFields(..., IndexingItemContext context)`**: Do the same for media items.
+- **`AddContentComputedFieldsAsync(..., IndexingItemContext context, CancellationToken)`**: Asynchronously add computed values to your custom fields for each document being indexed.
+- **`AddMediaComputedFieldsAsync(..., IndexingItemContext context, CancellationToken)`**: Do the same for media items.
 - **`RunForIndexes()`**: Specify which indexes the converter should run for.
+
+Converters with the same `Order` start together. The next order starts only after all converters in the preceding order have completed.
+
+For Lucene full-text search, caller-supplied `SearchFields` are used unchanged. When no fields are supplied, the search is limited to index-field definitions where `isSearchable` is `true`; configure at least one such field.
 
 ### The `IExternalIndexingConverter` Interface
 
@@ -789,7 +799,7 @@ public class CustomIndexingConverter : IIndexingConverter
         };
     }
 
-    public void AddContentComputedFields(IPublishedContent? publishedContent, IndexingModel indexingObject, IndexingItemContext context)
+    public Task AddContentComputedFieldsAsync(IPublishedContent? publishedContent, IndexingModel indexingObject, IndexingItemContext context, CancellationToken cancellationToken = default)
     {
         if (publishedContent != null)
         {
@@ -803,6 +813,8 @@ public class CustomIndexingConverter : IIndexingConverter
                 maxTokens: 900,
                 overlapTokens: 100);
         }
+
+        return Task.CompletedTask;
     }
 }
 ```
