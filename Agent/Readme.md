@@ -126,6 +126,7 @@ Place this under `SearchSettings` in application configuration. Keep tokens/keys
 | Managed Azure search, hybrid semantic relevance | Azure + `UseHybridSearch` |
 | Chunk-level vector matching | Azure + `UseChunkedVectorSearch` |
 | Custom fields calculated from Umbraco content/media | `IIndexingConverter` |
+| Result model needs a small known field set | `[SearchResultFieldProjection]` on a partial `SearchResultModelBase` model |
 | Ready-made browser endpoint | `UseSearch` / `UseSuggestionsSearch` |
 | Search for an AI/MCP client | `AddUmbracoSearchMcpTools` or `WithUmbracoSearchTools` |
 
@@ -167,6 +168,26 @@ var results = await searchService.SearchAsync<CommonSearchItemModel>(parameters)
 - `EngineSpecific`: last-mile native engine overrides. Prefer the portable model; an override makes engine parity the caller’s responsibility.
 
 Use `CommonSearchItemModel` for a conventional result. A feature-specific result model inherits `SearchResultModelBase` and reads defined fields with `ValueFor<T>(fieldDefinition)`.
+
+## Result field projections
+
+Use a result field projection when a feature-specific result model consumes a small, known set of index fields. Mark the model as `partial` and apply `[SearchResultFieldProjection]`:
+
+```csharp
+[SearchResultFieldProjection]
+public partial class ProductSearchResult : SearchResultModelBase
+{
+    public string? Name => ValueFor(ProductFields.Name);
+    public int Stock => ValueFor(ProductFields.Stock);
+    public string[] Tags => ValueFor(ProductFields.Tags) ?? [];
+}
+```
+
+The source generator discovers fields used by `ValueFor(...)`, `ValueForAs(...)`, and inherited base result classes, then generates the model's static `RequiredIndexFields` property. For custom helper methods that retrieve a field, mark the helper with `[SearchResultFieldAccessor]` so the generator can include its field argument.
+
+The projection is the model's field-retrieval contract. It lets search providers request only the fields this model uses, including localized and invariant field-name fallbacks. An unmarked model keeps the normal all-fields behavior.
+
+`ValueFor` remains lazy: scalar and multi-value fields are materialized when the model accesses them. Prefer the declared field type (`IndexFieldDefinition<int>`, `IndexFieldDefinition<string[]>`, and so on) over `ValueForAs<T>`; reserve `ValueForAs<T>` for serialized or custom values. Ensure every projected field is registered by an indexing converter and stored by the selected backend's index schema.
 
 ## Filtering, sorting, facets, and boosts
 
