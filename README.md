@@ -22,6 +22,7 @@ A comprehensive search solution for Umbraco, supporting both Lucene and Azure Se
     - [Configuration Details](#configuration-details)
   - [Basic Usage](#basic-usage)
     - [The `SearchParameters` Object](#the-searchparameters-object)
+    - [Search Result Field Projections](#search-result-field-projections)
   - [Minimal API Endpoints](#minimal-api-endpoints)
   - [MCP Tools](#mcp-tools)
   - [Advanced Usage](#advanced-usage)
@@ -396,13 +397,40 @@ var searchParameters = new SearchParameters
         },
         LuceneRequestOverride = query =>
         {
-            // Modify the underlying LuceneSearchQuery right before Execute runs
+            // Modify the underlying LuceneSearchQuery right before native Lucene execution
         }
     }
 };
 ```
 
 Both overrides are nullable and are invoked as `action?.Invoke(...)`.
+
+### Search Result Field Projections
+
+For models with a small, known field set, mark a partial class with `[SearchResultFieldProjection]`:
+
+```csharp
+[SearchResultFieldProjection]
+public partial class ProductSearchResultModel : SearchResultModelBase
+{
+    private static readonly IndexFieldDefinition<string> ProductName =
+        IndexFieldDefinitionFactory.ForString("productName");
+
+    private static readonly IndexFieldDefinition<int> StockLevel =
+        IndexFieldDefinitionFactory.ForInt("stockLevel");
+
+    public string? Name => ValueFor(ProductName);
+    public int Stock => ValueFor(StockLevel);
+}
+```
+
+The bundled source generator finds fields passed to `ValueFor(...)`, `ValueForAs(...)`, and methods explicitly marked with `[SearchResultFieldAccessor]`. It includes fields used by base result classes, then generates the model's static `RequiredIndexFields` property.
+
+The projection is the model's declaration of the index data it consumes. Search providers use it to request only those fields, including localized and invariant fallback names. A model without the attribute keeps the normal all-fields behavior.
+
+`ValueFor` resolves a field only when the corresponding model property is read. Scalar values and multi-value fields such as arrays and lists are materialized on demand; `ValueForAs<T>` remains the escape hatch for serialized or custom values.
+
+Implementation note: Azure applies the projection to its selected fields. Lucene executes the built native query, loads the projection's stored fields, and collects requested facets in that same result search.
 
 ## Minimal API Endpoints
 
@@ -885,3 +913,4 @@ public static class IndexingConstants
 ```
 
 </details>
+
