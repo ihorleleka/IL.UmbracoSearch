@@ -171,6 +171,8 @@ Use `CommonSearchItemModel` for a conventional result. A feature-specific result
 
 ## Result field projections
 
+The package provides two concrete common result bases. `CommonSearchItemModel` is the ordinary all-fields model; `CommonSearchResultProjection` exposes the same common properties but is the projected base for a projection hierarchy. Neither is abstract, and neither is required: consumers can define their own `SearchResultModelBase`-derived bases. Mark any custom base intended to participate in a projection hierarchy as `partial` with `[SearchResultFieldProjection]`.
+
 Use a result field projection when a feature-specific result model consumes a small, known set of index fields. Mark the model as `partial` and apply `[SearchResultFieldProjection]`:
 
 ```csharp
@@ -183,7 +185,11 @@ public partial class ProductSearchResult : SearchResultModelBase
 }
 ```
 
-The source generator discovers fields used by `ValueFor(...)`, `ValueForAs(...)`, and inherited base result classes, then generates the model's static `RequiredIndexFields` property. For custom helper methods that retrieve a field, mark the helper with `[SearchResultFieldAccessor]` so the generator can include its field argument.
+The source generator discovers fields used by `ValueFor(...)`, `ValueForAs(...)`, and marked helper accessors, then generates the model's static `RequiredIndexFields` property, fulfilling the static `ISearchResultFieldProjection` contract. For custom helper methods that retrieve a field, mark the helper with `[SearchResultFieldAccessor]` so the generator can include its field argument.
+Do not manually implement `ISearchResultFieldProjection` or declare `RequiredIndexFields`; use the attribute on a partial model.
+Projection is direct-only: an unmarked derived model does not inherit its base model's projection.
+A projected model in a downstream assembly composes the `RequiredIndexFields` member from its nearest metadata base. Use the package's partial `[SearchResultFieldProjection]` `CommonSearchResultProjection` as that base; `CommonSearchItemModel` remains an ordinary unprojected model.
+Every hierarchy level intended as a reusable projection base must itself be `partial` and directly marked with `[SearchResultFieldProjection]`. If marked `A` inherits unmarked, non-partial `B`, the generator instead composes from the next marked ancestor `C`; B's fields are included only while B is source-visible in A's compilation. Mark B when its fields must flow across project/package boundaries.
 
 The projection is the model's field-retrieval contract. It lets search providers request only the fields this model uses, including localized and invariant field-name fallbacks. An unmarked model keeps the normal all-fields behavior.
 
