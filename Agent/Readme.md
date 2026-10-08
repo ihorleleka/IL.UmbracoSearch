@@ -155,7 +155,7 @@ var results = await searchService.SearchAsync<CommonSearchItemModel>(parameters)
 `SearchParameters` contract:
 
 - `IndexName`: optional; fallback is `DefaultIndexName`.
-- `FullTextSearch`: keywords, optional typed field targeting/boosts, wildcard option, and Azure hybrid controls.
+- `FullTextSearch`: keywords, optional typed field targeting/boosts, wildcard option, phrase boosting, and Azure hybrid controls. Set `BoostExactPhrase = true` to add the complete unquoted input as an exact phrase with a boost of 10; quoted input is left unchanged.
 - `Skip` / `Take`: paging. Public endpoints should impose their own maximum `Take`.
 - `Aliases`: Umbraco content type aliases.
 - `Filters`: typed conditions or `And`/`Or`/`Not` filter trees.
