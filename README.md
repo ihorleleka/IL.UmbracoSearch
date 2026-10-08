@@ -69,7 +69,7 @@ app.UseSearchAnalyticsClicks();
 app.MapSearchAnalyticsManagement(authorizationPolicy: "SearchInsights");
 ```
 
-4. In your front end, use the npm package `@ihorleleka/umbraco-search-analytics` to post consented clicks using the search response `trackingReference`.
+4. In your front end, set `SearchParameters.Analytics = new AnalyticsRequest()` (or `SearchRequest.Analytics` for the built-in endpoint) when analytics is requested. Set its optional `SiteKey` to partition analytics by website. Use the returned `SearchResults.Analytics.TrackingReference` to post consented clicks with the npm package `@ihorleleka/umbraco-search-analytics`.
 
 5. Configure Search Insights under `SearchSettings:Analytics`:
 
@@ -90,7 +90,7 @@ app.MapSearchAnalyticsManagement(authorizationPolicy: "SearchInsights");
 }
 ```
 
-Important SSR/hydration note: `trackingReference` is generated per executed search call. If your app performs the same search during SSR and then executes it again during hydration, analytics will count both. Reuse SSR search data on hydration to avoid duplicate analytics. For non-user-visible/system calls, set `SearchParameters.CaptureAnalytics = false` (or `SearchRequest.CaptureAnalytics = false` when using the built-in search endpoint).
+Important SSR/hydration note: `SearchResults.Analytics.TrackingReference` is generated per executed search call. If your app performs the same search during SSR and then executes it again during hydration, analytics will count both. Reuse SSR search data on hydration to avoid duplicate analytics. Analytics is requested only when `SearchParameters.Analytics` (or `SearchRequest.Analytics`) is supplied; set `CaptureAnalytics = false` inside that object for non-user-visible/system calls.
 
 ## Quick Start
 
@@ -369,7 +369,7 @@ var searchParameters = new SearchParameters
 
 This object allows you to define your query:
 
-- **FullTextSearch:** The full-text search query.
+- **FullTextSearch:** The full-text search query. Set `BoostExactPhrase = true` to OR the complete unquoted input as an exact phrase with a boost of 10; inputs that already contain double quotes retain their existing quoted-query behavior.
 - **Skip/Take:** For pagination.
 - **Aliases:** Filter by document type aliases.
 - **SearchOrderings:** Define how to sort results.
@@ -379,7 +379,7 @@ This object allows you to define your query:
 - **IndexName:** Specify which index to search.
 - **Root:** Restrict the search to a subtree by node ID or node key.
 - **LanguageIsoCode:** The culture to search in.
-- **CaptureAnalytics:** Defaults to true. Set false to skip optional analytics capture for that call.
+- **Analytics:** Optional analytics request. Analytics is not requested unless this object is supplied; set `CaptureAnalytics = false` inside it to skip capture for that call.
 - **EngineSpecific:** Optional escape hatch for engine-specific request customization right before execution.
 
 Example:
@@ -489,7 +489,7 @@ app.UseSearch<MySearchItemModel>();
 app.UseSuggestionsSearch<MySearchItemModel>();
 ```
 
-The default request contracts are `SearchRequest` and `SuggestionsSearchRequest`. They are mapped onto `SearchParameters` and `SuggestionSettings`, and any unknown field names are ignored by default.
+The default request contracts are `SearchRequest` and `SuggestionsSearchRequest`. They are mapped onto `SearchParameters` and `SuggestionSettings`, and any unknown field names are ignored by default. When the optional analytics package is enabled and `SuggestionsSearchRequest.Analytics` is supplied, the response is a `SuggestionResult<SuggestionResultItem<T>>` envelope containing analytics metadata, total count, and the returned suggestion items.
 
 ## MCP Tools
 
