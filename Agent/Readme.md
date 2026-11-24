@@ -3,7 +3,17 @@
 Use this file as the implementation playbook when `IL.UmbracoSearch` is installed from NuGet and source code is unavailable. It records the public configuration, extension points, behavior contracts, and troubleshooting rules needed to build a search feature in an Umbraco application.
 
 > [!IMPORTANT]
-> This guide applies to **IL.UmbracoSearch 17.8.0.1+**. This is a breaking line: applications must use .NET 10 and Umbraco 17+. Umbraco 13-16 and .NET 8-9 are unsupported. `IIndexingConverter` computed-field methods and `IExternalIndexingConverter.GetIndexingModelsAsync` are asynchronous and return `Task`; converters in the same `Order` run concurrently, and order groups run sequentially.
+> This guide applies to **IL.UmbracoSearch 17.8.0.1+**. This is a breaking line: applications must pair .NET 10 with Umbraco 17.8.1+ (<18), or .NET 11 with Umbraco 18.3.1+ (<19). Both runtime targets use EF Core 10, matching the Umbraco persistence dependency line. Umbraco 13-16 and .NET 8-9 are unsupported. `IIndexingConverter` computed-field methods and `IExternalIndexingConverter.GetIndexingModelsAsync` are asynchronous and return `Task`; converters in the same `Order` run concurrently, and order groups run sequentially.
+
+## Dependency version selection
+
+The runtime packages declare bounded ranges, so a consuming application's direct `PackageReference` or central package version can choose a compatible version within them. Bare NuGet versions already express minimums; explicit `[minimum, next-major)` ranges add an upper bound, not an exact pin or a promise that every future release has been tested. Keep EF Core/DI on 10.x and use the framework-specific Umbraco range above. The Azure dependencies retain their required preview minimums (OpenAI 2.9.0-beta.1 and Search.Documents 12.1.0-beta.2); earlier stable versions are not substitutes.
+
+## Async integration contracts
+
+Custom implementations of `ILanguageResolutionService` must implement `GetAllLanguagesAsync`, `GetDefaultLanguageIsoCodeAsync`, and `ResolveLanguageIsoCodeAsync`. `ISearchRequestNormalizer` exposes `NormalizeAsync` overloads for search and suggestions. Await these methods and forward cancellation tokens; the old synchronous contracts have been removed. Direct computed-field callers must await `AddComputedFieldsAsync`; `AddComputedFields` has also been removed.
+
+Language lookup cancellation stops the caller's wait because Umbraco's language API has no cancellation parameter. Azure hit enumeration is asynchronous, preserves `Take` (including zero-hit facet requests), and propagates cancellation rather than returning an empty successful response. The Azure SDK may not cancel an already in-flight continuation request; cancellation is checked again when each hit arrives.
 
 ## What this package is
 
