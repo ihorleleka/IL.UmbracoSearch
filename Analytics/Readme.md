@@ -1,7 +1,10 @@
 # IL.UmbracoSearch.Analytics
 
-Optional Search Insights for IL.UmbracoSearch. This package targets **Umbraco
-17 / .NET 10 only**.
+Optional Search Insights for IL.UmbracoSearch. This package targets **.NET 10 with Umbraco 17.8.1+ (<18)** and **.NET 11 with Umbraco 18.3.1+ (<19)**. Both targets use EF Core 10, matching the Umbraco 17 and 18 persistence dependency line.
+
+Starting with `IL.UmbracoSearch` **17.8.0.1**, this is part of the supported runtime baseline: Umbraco 13-16 and .NET 8-9 are not supported.
+
+Runtime dependencies use bounded NuGet ranges, including `IL.AttributeBasedDI` `[2.10.1.1, 3.0.0)` and EF Core `[10.0.15, 11.0.0)`. Consumers can select versions within these bounds through direct package references or central package management, subject to the full dependency graph. Bare versions already mean minimums; the explicit upper bound defines the supported major family. The main package README explains the shared runtime dependency policy.
 
 ## Enable Analytics
 
@@ -14,14 +17,20 @@ builder.Services.AddUmbracoSearch(SearchOptions.Azure | SearchOptions.Analytics)
 ```
 
 Analytics decorates `ISearchService`; it does not change query/result semantics.
-Completed searches may receive a `TrackingReference`. Capture is non-blocking and
-stores only GUID `UmbracoNodeKey` values for impressions/clicks.
+Analytics is requested per search by supplying `SearchParameters.Analytics` (or
+`SearchRequest.Analytics` for the built-in endpoint). When requested, capture is
+non-blocking and stores only GUID `UmbracoNodeKey` values for impressions/clicks.
 
-Captured searches also return an `AnalyticsSessionToken`. Store it in the caller
-and pass it as `SearchParameters.AnalyticsSessionToken` on a later search to
-group those executions as one **Search session**. The package does not expire
-session tokens; omit the value to begin a new session. `TrackingReference`
-remains distinct for every execution and must still be used for click tracking.
+Captured searches return `SearchResults.Analytics`, containing a tracking reference
+and session token. Store the session token in the caller and pass it as
+`AnalyticsRequest.AnalyticsSessionToken` on a later search to group executions as
+one **Search session**. `AnalyticsResponse.TrackingReference` remains distinct for
+every execution and must be used for click tracking. Set the optional
+`AnalyticsRequest.SiteKey` to partition events by website; the backoffice exposes
+that value through the website filter. The response object is null
+when analytics was not requested or is disabled globally. Suggestion responses
+return a `SuggestionResult<SuggestionResultItem<T>>` envelope containing
+`Analytics`, `TotalItemCount`, and the returned suggestion items.
 
 ## Session insights
 
@@ -35,9 +44,9 @@ analysis is limited to the most recent 10,000 matching raw events and indicates
 when a wide reporting window is sampled. These insights depend on raw retained
 events and are not available beyond `RawEventRetention`.
 
-Per-call capture opt-out is available through `SearchParameters.CaptureAnalytics`.
-Set it to `false` on individual searches that must not be captured (for example,
-server-generated/internal searches).
+Per-call capture opt-out is available through `SearchParameters.Analytics`.
+Set `CaptureAnalytics = false` inside the object on searches that must not be
+captured (for example, server-generated/internal searches).
 
 ## Consumer setup checklist
 
@@ -88,7 +97,9 @@ Supported `SearchSettings:Analytics` options:
 - `SynonymFieldNames`
 
 `CaptureAnalytics` is not an appsetting; it is a per-request flag on
-`SearchParameters` (and the default HTTP `SearchRequest`) for selective capture.
+`AnalyticsRequest`, nested in `SearchParameters.Analytics` (or the default HTTP
+`SearchRequest.Analytics`) for selective capture. The analytics request object is
+nullable and omitted by default.
 
 Storage defaults:
 
@@ -129,7 +140,7 @@ import { trackSearchResultClick } from '@ihorleleka/umbraco-search-analytics';
 await trackSearchResultClick(
   { endpoint: '/api/search/analytics/click', consent: () => hasAnalyticsConsent() },
   {
-    trackingReference: search.trackingReference,
+    trackingReference: search.analytics.trackingReference,
     nodeKey: item.nodeKey,
     position: index + 1,
     idempotencyKey: crypto.randomUUID()
@@ -183,10 +194,10 @@ record two executions.
 
 To avoid duplicate analytics with the current implementation, reuse SSR search
 results during hydration instead of issuing a second identical search call, or
-set `CaptureAnalytics = false` on non-user-visible/server-generated searches.
+set `Analytics = new AnalyticsRequest { CaptureAnalytics = false }` on non-user-visible/server-generated searches.
 
 You can also suppress analytics for specific replay/internal searches by setting
-`SearchParameters.CaptureAnalytics = false` for those calls.
+`SearchParameters.Analytics.CaptureAnalytics = false` for those calls.
 
 ## Multi-server deployments
 
@@ -246,6 +257,39 @@ enabled mappings, and refreshes managed active/indexing index definitions. It
 does not upload or reindex content documents. Set distinct prefixes such as
 `staging-us-` and `production-us-` when environments share an Azure Search
 service.
+
+## Local Storybook preview for Search section FE
+
+Use the local Storybook workspace to evolve Search-section UI and fake-data
+states without publishing a new package release.
+
+Workspace path:
+
+- `src/UmbracoSearch.Analytics.Backoffice.Client/`
+
+Backoffice modules are authored in that workspace's `src/` directory. Generate the
+NuGet package assets before packing or testing a UI change:
+
+```bash
+cd src/UmbracoSearch.Analytics.Backoffice.Client
+npm run build
+```
+
+The build writes to `src/UmbracoSearch.Analytics/wwwroot/App_Plugins/IL.UmbracoSearch.Analytics/`.
+
+Run locally:
+
+```bash
+cd src/UmbracoSearch.Analytics.Backoffice.Client
+npm install
+npm run storybook
+```
+
+Build preview artifacts:
+
+```bash
+npm run build-storybook
+```
 
 The preview uses a Storybook-only fake-data provider. Runtime backoffice
 behavior remains unchanged: production continues to use authenticated Umbraco
