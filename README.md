@@ -4,17 +4,31 @@
 A comprehensive search solution for Umbraco, supporting both Lucene and Azure Search, with extensible indexing and flexible search parameters.
 
 > [!WARNING]
-> **17.8.0.1 is a breaking release.** Consumer applications must target .NET 10 and Umbraco 17+. `IIndexingConverter` computed-field methods and `IExternalIndexingConverter.GetIndexingModelsAsync` now return `Task`; update former synchronous implementations and await asynchronous work. Converters with the same `Order` run concurrently, while order groups run sequentially.
+> **17.8.0.1 is a breaking release.** Consumer applications must pair .NET 10 with Umbraco 17, or .NET 11 with Umbraco 18. `IIndexingConverter` computed-field methods and `IExternalIndexingConverter.GetIndexingModelsAsync` now return `Task`; update former synchronous implementations and await asynchronous work. Converters with the same `Order` run concurrently, while order groups run sequentially.
 
 > [!IMPORTANT]
-> `IL.UmbracoSearch` supports Umbraco 17 on .NET 10. Umbraco 13–16 and .NET 8–9 are no longer supported.
+> `IL.UmbracoSearch` has framework-specific CMS dependencies: **.NET 10 → Umbraco 17.8.1+ (<18)**; **.NET 11 → Umbraco 18.3.1+ (<19)**. Umbraco 13–16 and .NET 8–9 are no longer supported. Both targets retain EF Core 10 and DI abstractions 10, matching the Umbraco 17/18 dependency graph. Do not mix Umbraco 17 with the .NET 11 package asset or Umbraco 18 with the .NET 10 asset.
+
+## Dependency version selection
+
+External runtime NuGet dependencies use inclusive-minimum, exclusive-next-major ranges. For example, JWT uses `[8.23.0, 9.0.0)`, ModelContextProtocol uses `[2.4.0, 3.0.0)`, both tokenizer packages use `[3.0.0, 4.0.0)`, and IL.AttributeBasedDI uses `[2.10.1.1, 3.0.0)`. EF Core and DI remain `[10.0.15, 11.0.0)` on both targets; the framework-specific Umbraco ranges above remain separate.
+
+A bare NuGet version such as `2.4.0` already means a minimum, not an exact pin. Explicit ranges add an upper compatibility bound. A consuming project can select a version inside the range with its own `PackageReference` or central package version; it must also satisfy the rest of its dependency graph. These bounds do not certify every future version, and outside-range versions are not supported by this declaration.
+
+The required Azure preview APIs are retained: Azure.AI.OpenAI uses `[2.9.0-beta.1, 3.0.0)` and Azure.Search.Documents uses `[12.1.0-beta.2, 13.0.0)`. Do not downgrade to earlier stable releases just to remove a prerelease dependency. Analyzer/compiler, test and build-tool versions stay reproducible rather than sharing this runtime range policy.
+
+## Async extension contracts
+
+Custom `ILanguageResolutionService` implementations now provide `GetAllLanguagesAsync`, `GetDefaultLanguageIsoCodeAsync`, and `ResolveLanguageIsoCodeAsync`. `ISearchRequestNormalizer` exposes `NormalizeAsync` overloads for search and suggestions. Await them and forward cancellation tokens; synchronous compatibility methods are not retained. Direct computed-field callers must use `AddComputedFieldsAsync` rather than the removed `AddComputedFields`.
+
+Search/suggestion normalization and computed-field indexing await language I/O. Umbraco's language API has no cancellation parameter, so cancellation stops the caller's wait rather than the underlying lookup. Azure results use asynchronous paging and stop at `Take`; zero-item facet requests never enumerate hits. Cancellation propagates instead of being converted to an empty search result. The current Azure SDK may not cancel an already in-flight continuation HTTP request; cancellation is checked again when each hit arrives.
 
 ## Table of Contents
 
 - [IL.UmbracoSearch](#ilumbracosearch)
   - [Table of Contents](#table-of-contents)
   - [Features](#features)
-  - [Optional Search Insights Setup (Umbraco 17)](#optional-search-insights-setup-umbraco-17)
+  - [Optional Search Insights Setup (Umbraco 17 and 18)](#optional-search-insights-setup-umbraco-17-and-18)
   - [Quick Start](#quick-start)
   - [Configuration](#configuration)
     - [1. Service Registration](#1-service-registration)
@@ -47,9 +61,10 @@ A comprehensive search solution for Umbraco, supporting both Lucene and Azure Se
 - **Hybrid search (Azure only):** Combine keyword search with vector search for more relevant results.
 - **Granular hybrid search (Azure only):** Optionally store chunk-level vectors per item (multi-vector field) for finer vector matching.
 - **Extensible:** Add your own custom fields to the search index.
-- **Optional Search Insights:** On Umbraco 17, install `IL.UmbracoSearch.Analytics` and add `SearchOptions.Analytics` alongside exactly one engine to capture search and consented click metrics. See the analytics package README for SQL setup, the backoffice Search section, Azure-only synonyms, and the npm click helper.
+- **Optional Search Insights:** On Umbraco 17 or 18, install `IL.UmbracoSearch.Analytics` and add `SearchOptions.Analytics` alongside exactly one engine to capture search and consented click metrics. See the analytics package README for SQL setup, the backoffice Search section, Azure-only synonyms, and the npm click helper.
+- **Optional backoffice document search:** Add `SearchOptions.BackofficeDocumentSearch` alongside exactly one search engine to route only the Umbraco backoffice document search through the package's `InternalIndex`; the package automatically registers its fields and value transformation with that index, while media, members, and other entity searches keep Umbraco's built-in implementation.
 
-## Optional Search Insights Setup (Umbraco 17)
+## Optional Search Insights Setup (Umbraco 17 and 18)
 
 For projects using Search Insights:
 
@@ -60,6 +75,9 @@ For projects using Search Insights:
 builder.Services.AddUmbracoSearch(SearchOptions.Lucene | SearchOptions.Analytics);
 // or
 builder.Services.AddUmbracoSearch(SearchOptions.Azure | SearchOptions.Analytics);
+
+// Optionally replace only the Umbraco backoffice document search.
+builder.Services.AddUmbracoSearch(SearchOptions.Lucene | SearchOptions.BackofficeDocumentSearch);
 ```
 
 3. Map analytics endpoints in your app startup:
