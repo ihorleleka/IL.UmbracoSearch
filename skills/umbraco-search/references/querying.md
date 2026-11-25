@@ -1,0 +1,96 @@
+# Querying
+
+Inject `ISearchService`; `SearchAsync<T>(SearchParameters)` returns `SearchResults<T>` (`Items`, `TotalItemCount`, `Facets`, `Analytics`). `T` is `CommonSearchItemModel` or your own `SearchResultModelBase` model.
+
+## `SearchParameters`
+
+| Property | Notes |
+| --- | --- |
+| `IndexName` | Optional; falls back to `SearchSettings.DefaultIndexName`. |
+| `FullTextSearch` | Keywords, optional field targeting and boosts. A plain `string` converts implicitly. |
+| `Skip` / `Take` | Paging. `Take` defaults to `int.MaxValue`; always set it and cap public input. |
+| `Aliases` | Umbraco content type aliases. |
+| `Filters` | `List<ISearchFilter>`; all must match. |
+| `SearchOrderings` | Relevance and/or typed field orderings. |
+| `FacetOn` | Facets to compute (fields must be declared facetable). |
+| `ExtraBoostingOptions` | `{ FieldDefinition, Value, Boost = 10 }` score boosts. |
+| `Root` | Subtree by node id, key or `Guid`; accepts `int`, `string` or `Guid` implicitly. |
+| `LanguageIsoCode` | Culture; normalized against configured Umbraco languages. |
+| `IncludeExcludedFromSearch` | Opt in to normally excluded/soft-deleted content, only when intended. |
+| `Analytics` | Optional analytics request (see the analytics skill). |
+| `EngineSpecific` | Last-mile `AzureRequestOverride` / `LuceneRequestOverride`; you then own engine parity. |
+
+## Full-text
+
+`new FullTextSearch(query, searchFields, useWildcardSearch: true, useHybridSearch: false, boostExactPhrase: false)`; `SearchMode` defaults to `All` (every term required).
+
+- A complete `"quoted"` section is one required word group, not an exact phrase. With explicit `SearchFields`, every word of the group is bound to its field.
+- Standalone `AND`, `OR`, `NOT` are treated as search terms; special characters are escaped.
+- Wildcards apply only to terms longer than 2 characters (Azure matches exact and prefix; Lucene prefix).
+- `BoostExactPhrase = true` also matches the whole unquoted input as an exact phrase with boost 10; input containing a double quote skips it.
+- `SearchFields = [new SearchField(ProductFields.Name, 2f)]` is authoritative. Without it, Lucene searches only `isSearchable: true` fields.
+- Azure-only: `UseHybridSearch`, `VectorBasedResultsWeight` (default 1), `VectorSimilarityThreshold`, `CustomVector` (see `azure-and-vectors.md`).
+
+## Filters
+
+```csharp
+Filters =
+[
+    ISearchFilter.FilterFor(ProductFields.Sku, "A-100"),                        // scalar string
+    ISearchFilter.FilterFor(IndexingConstants.ComputedIndexFields.NodeIdInt, 1234), // scalar int
+    ISearchFilter.FilterForCollectionField(ProductFields.Tags, "sale", "new"),  // collection (default OR)
+    ISearchFilter.RangeFilterFor(ProductFields.Stock, 1, 100),                  // numeric range
+    ISearchFilter.And(
+        ISearchFilter.FilterFor(ProductFields.Sku, "A-100"),
+        ISearchFilter.Not(ISearchFilter.FilterFor(IndexingConstants.ComputedIndexFields.ItemType, "archived")))
+]
+```
+
+- One leaf targets one field; combine fields with `And`, `Or`, `Not`. Pass a `FilteringBehavior` (`And`, `Or`, `Not`) before the values to control how multiple values combine (collection leaves default to `Or`).
+- `FilterFor(IIndexFieldDefinition, params string[])` is the fallback when a field is only known at runtime.
+- `FilterFor` on a collection field is analyzer `ILUS0002`; `FilterForCollectionField` on a scalar field is `ILUS0003`.
+- Keep the field's real type; filtering numbers or dates as strings is engine-specific and fragile. Lucene string filters are case-sensitive on stored values.
+
+## Ordering, facets, boosts
+
+- `ISearchOrdering.ByScore(OrderingType.Descending)` and `ISearchOrdering.ByField(field, OrderingType...)`; a sort field must be declared sortable. Azure drops score ordering for hybrid requests.
+- `FacetOn = [new FacetOn(ProductFields.Tags, amountOfTopFacetsToTake: 20)]` returns `Facet`s keyed by the requested logical field name on both engines, including multi-language fields. A request with `Skip 0`, `Take 0` and facets returns totals and facets without items.
+- Use `ExtraBoostingOptions` only for explicit relevance policy and check it on the chosen engine.
+
+## Suggestions
+
+`SuggestAsync<T>(new SuggestionSettings { Term, Size = 8, Fuzzy, Highlights, HighlightsTag = "b", Aliases, IndexName, LanguageIsoCode })` returns `SuggestionResult<SuggestionResultItem<T>>` (`Items` with `Item` and `Text`, `TotalItemCount`). The term is trimmed (blank returns nothing), `Size` is at least 1, and `HighlightsTag` must be a plain tag name such as `em`, otherwise `b` is used. Azure suggestions exclude content flagged excluded for the request language.
+
+## Language
+
+- Define fields `isMultiLanguage: true` only when values differ per culture; indexing expands them to culture-specific fields.
+- Set `LanguageIsoCode`. `en`, `en-GB` and `en_GB` are equivalent; the closest configured language is used, otherwise the default language. The default language reads the base (unsuffixed) field.
+- Never build suffixed names by hand.
+- Test the default and one non-default culture for every multi-language feature.
+
+## Taxonomy
+
+`item.AddTaxonomyValue("Category", "SubCategory", "Tag")` (in a converter) stores the full path `Category__SubCategory__Tag` in `TaxonomyTags` and `Category__SubCategory` in `TaxonomyCategories`; a single segment adds only a tag. Another overload writes custom taxonomy fields.
+
+- Facet on `TaxonomyTags`; filter `TaxonomyCategories` to drill down.
+- With `EnableTaxonomyFacetExpansion`, the built-in facets become a hierarchy: a root `Facet` (bound to `TaxonomyCategories`) with `Values`, nested through `FacetOption.ChildFacets`; `ChildFacetsIndexFieldName` names the field for the next level. Expansion does not apply to custom taxonomy fields.
+- With both expansion settings on, an `Or` filter spanning categories is regrouped by parent path into an `And` of per-category `Or` groups. Do not repeat that logic in UI code.
+
+## Result models and projections
+
+Derive from `SearchResultModelBase` and read fields lazily with `ValueFor(field)` (typed) or `ValueForAs<T>(field)` (serialized/custom values):
+
+```csharp
+[SearchResultFieldProjection]
+public partial class ProductSearchResult : SearchResultModelBase
+{
+    public string? Sku => ValueFor(ProductFields.Sku);
+    public string[] Tags => ValueFor(ProductFields.Tags) ?? [];
+}
+```
+
+- `[SearchResultFieldProjection]` on a `partial` model makes the bundled generator emit `RequiredIndexFields` from the fields used in `ValueFor`/`ValueForAs` and in methods marked `[SearchResultFieldAccessor]`; the engine then fetches only those fields. Do not declare `ISearchResultFieldProjection` or `RequiredIndexFields` yourself. Unmarked models keep all-fields retrieval.
+- Projection is direct-only: an unmarked derived model does not inherit its base's projection. Each reusable base must itself be `partial` and marked.
+- `CommonSearchResultProjection` is the projected common base; `CommonSearchItemModel` is the ordinary unprojected one. Across assemblies a model composes `RequiredIndexFields` from its nearest marked base; mark intermediate bases whose fields must flow further.
+- Every projected field must be registered by an indexing converter and stored by the engine's schema.
+- Both engines always add the node key to what they fetch, so analytics works for projected models.

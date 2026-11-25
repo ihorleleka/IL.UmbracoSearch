@@ -1,947 +1,104 @@
 [![NuGet version (IL.AttributeBasedDI)](https://img.shields.io/nuget/v/IL.UmbracoSearch.svg?style=flat-square)](https://www.nuget.org/packages/IL.UmbracoSearch/)
 # IL.UmbracoSearch
 
-A comprehensive search solution for Umbraco, supporting both Lucene and Azure Search, with extensible indexing and flexible search parameters.
-
-> [!WARNING]
-> **17.8.0.1 is a breaking release.** Consumer applications must pair .NET 10 with Umbraco 17, or .NET 11 with Umbraco 18. `IIndexingConverter` computed-field methods and `IExternalIndexingConverter.GetIndexingModelsAsync` now return `Task`; update former synchronous implementations and await asynchronous work. Converters with the same `Order` run concurrently, while order groups run sequentially.
+Search for Umbraco 17 and 18 on top of your existing Examine indexes, with two interchangeable engines: **Lucene** (Examine) and **Azure AI Search**. Typed filters, facets, sorting, boosts and suggestions; custom indexing through `IIndexingConverter`; optional hybrid and chunk-level vector search (Azure); optional minimal API endpoints and MCP tools for AI clients.
 
 > [!IMPORTANT]
-> `IL.UmbracoSearch` has framework-specific CMS dependencies: **.NET 10 → Umbraco 17.8.1+ (<18)**; **.NET 11 → Umbraco 18.3.1+ (<19)**. Umbraco 13–16 and .NET 8–9 are no longer supported. Both targets retain EF Core 10 and DI abstractions 10, matching the Umbraco 17/18 dependency graph. Do not mix Umbraco 17 with the .NET 11 package asset or Umbraco 18 with the .NET 10 asset.
-
-## Dependency version selection
-
-External runtime NuGet dependencies use inclusive-minimum, exclusive-next-major ranges. For example, JWT uses `[8.23.0, 9.0.0)`, ModelContextProtocol uses `[2.4.0, 3.0.0)`, both tokenizer packages use `[3.0.0, 4.0.0)`, and IL.AttributeBasedDI uses `[2.10.1.1, 3.0.0)`. EF Core and DI remain `[10.0.15, 11.0.0)` on both targets; the framework-specific Umbraco ranges above remain separate.
-
-A bare NuGet version such as `2.4.0` already means a minimum, not an exact pin. Explicit ranges add an upper compatibility bound. A consuming project can select a version inside the range with its own `PackageReference` or central package version; it must also satisfy the rest of its dependency graph. These bounds do not certify every future version, and outside-range versions are not supported by this declaration.
-
-The required Azure preview APIs are retained: Azure.AI.OpenAI uses `[2.9.0-beta.1, 3.0.0)` and Azure.Search.Documents uses `[12.1.0-beta.2, 13.0.0)`. Do not downgrade to earlier stable releases just to remove a prerelease dependency. Analyzer/compiler, test and build-tool versions stay reproducible rather than sharing this runtime range policy.
-
-## Async extension contracts
-
-Custom `ILanguageResolutionService` implementations now provide `GetAllLanguagesAsync`, `GetDefaultLanguageIsoCodeAsync`, and `ResolveLanguageIsoCodeAsync`. `ISearchRequestNormalizer` exposes `NormalizeAsync` overloads for search and suggestions. Await them and forward cancellation tokens; synchronous compatibility methods are not retained. Direct computed-field callers must use `AddComputedFieldsAsync` rather than the removed `AddComputedFields`.
-
-Search/suggestion normalization and computed-field indexing await language I/O. Umbraco's language API has no cancellation parameter, so cancellation stops the caller's wait rather than the underlying lookup. Azure results use asynchronous paging and stop at `Take`; zero-item facet requests never enumerate hits. Cancellation propagates instead of being converted to an empty search result. The current Azure SDK may not cancel an already in-flight continuation HTTP request; cancellation is checked again when each hit arrives.
-
-## Table of Contents
-
-- [IL.UmbracoSearch](#ilumbracosearch)
-  - [Table of Contents](#table-of-contents)
-  - [Features](#features)
-  - [Optional Search Insights Setup (Umbraco 17 and 18)](#optional-search-insights-setup-umbraco-17-and-18)
-  - [Quick Start](#quick-start)
-  - [Configuration](#configuration)
-    - [1. Service Registration](#1-service-registration)
-    - [2. AppSettings](#2-appsettings)
-    - [Configuration Details](#configuration-details)
-  - [Basic Usage](#basic-usage)
-    - [The `SearchParameters` Object](#the-searchparameters-object)
-    - [Search Result Field Projections](#search-result-field-projections)
-  - [Minimal API Endpoints](#minimal-api-endpoints)
-  - [MCP Tools](#mcp-tools)
-  - [Advanced Usage](#advanced-usage)
-    - [Advanced SearchApiController Example](#advanced-searchapicontroller-example)
-    - [Multi-Language Support](#multi-language-support)
-  - [Customizing the Index](#customizing-the-index)
-    - [The `IIndexingConverter` Interface](#the-iindexingconverter-interface)
-    - [Defining Index Fields](#defining-index-fields)
-    - [Auto-Discovery with DI Registration Attributes](#auto-discovery-with-di-registration-attributes)
-    - [Example: Custom Indexing Converter](#example-custom-indexing-converter)
-  - [Customizing Search Results](#customizing-search-results)
-    - [`CommonSearchItemModel`](#commonsearchitemmodel)
-    - [Custom Models with `ValueFor<T>`](#custom-models-with-valuefort)
-  - [Built-in Indexing Constants](#built-in-indexing-constants)
+> **Compatibility.** Pair the package with the Umbraco version that matches your runtime. Umbraco 13-16 and .NET 8-9 are not supported.
+>
+> | Application runtime | Umbraco CMS |
+> | --- | --- |
+> | .NET 10 | 17.8.1 or later, below 18 |
+> | .NET 11 | 18.3.1 or later, below 19 |
+>
+> Both targets use EF Core 10. Versions from 17.8.0.1 on have asynchronous indexing extension points (`IIndexingConverter` computed-field methods return `ValueTask`, `IExternalIndexingConverter.GetIndexingModelsAsync` returns `Task`); see the [compatibility and upgrade notes](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search/references/compatibility-and-upgrade.md).
 
 ## Features
 
-- **Full-text search:** Search for keywords in the content of the documents.
-- **Filtering:** Filter search results by various criteria, such as document type, date range, and tags.
-- **Sorting:** Sort search results by relevance, date, or any other field.
-- **Faceting:** Get a count of the number of documents that match each value of a field.
-- **Hybrid search (Azure only):** Combine keyword search with vector search for more relevant results.
-- **Granular hybrid search (Azure only):** Optionally store chunk-level vectors per item (multi-vector field) for finer vector matching.
-- **Extensible:** Add your own custom fields to the search index.
-- **Optional Search Insights:** On Umbraco 17 or 18, install `IL.UmbracoSearch.Analytics` and add `SearchOptions.Analytics` alongside exactly one engine to capture search and consented click metrics. See the analytics package README for SQL setup, the backoffice Search section, Azure-only synonyms, and the npm click helper.
-- **Optional backoffice document search:** Add `SearchOptions.BackofficeDocumentSearch` alongside exactly one search engine to route only the Umbraco backoffice document search through the package's `InternalIndex`; the package automatically registers its fields and value transformation with that index, while media, members, and other entity searches keep Umbraco's built-in implementation.
+- Full-text search with field targeting, boosts, wildcards and exact-phrase boosting.
+- Typed filters (`FilterFor`, `FilterForCollectionField`, ranges, `And`/`Or`/`Not`), sorting, facets, suggestions, subtree search and language-aware fields.
+- Hierarchical taxonomy facets and filters.
+- Custom fields through `IIndexingConverter` and `IExternalIndexingConverter`; Roslyn analyzers that catch missing registrations and wrong filter helpers at build time.
+- Result field projections: a source generator makes a result model fetch only the fields it reads.
+- Azure only: hybrid keyword/vector search, chunk-level vectors, scoring profiles, blue/green index rebuilds.
+- Optional: ready-made minimal API search endpoints, MCP search tools, Umbraco backoffice document search, and [Search Insights](https://www.nuget.org/packages/IL.UmbracoSearch.Analytics) analytics.
 
-## Optional Search Insights Setup (Umbraco 17 and 18)
+The package attaches to **existing** Umbraco indexes (normally `ExternalIndex`, optionally `InternalIndex`); it never creates Lucene indexes.
 
-For projects using Search Insights:
+## Install
 
-1. Install `IL.UmbracoSearch.Analytics`.
-2. Enable analytics with one engine:
-
-```csharp
-builder.Services.AddUmbracoSearch(SearchOptions.Lucene | SearchOptions.Analytics);
-// or
-builder.Services.AddUmbracoSearch(SearchOptions.Azure | SearchOptions.Analytics);
-
-// Optionally replace only the Umbraco backoffice document search.
-builder.Services.AddUmbracoSearch(SearchOptions.Lucene | SearchOptions.BackofficeDocumentSearch);
+```bash
+dotnet add package IL.UmbracoSearch
 ```
 
-3. Map analytics endpoints in your app startup:
+## Register an engine
+
+Choose exactly one of `SearchOptions.Lucene` or `SearchOptions.Azure` in `Program.cs`:
 
 ```csharp
-app.UseSearchAnalyticsClicks();
-app.MapSearchAnalyticsManagement(authorizationPolicy: "SearchInsights");
-```
-
-4. In your front end, set `SearchParameters.Analytics = new AnalyticsRequest()` (or `SearchRequest.Analytics` for the built-in endpoint) when analytics is requested. Set its optional `SiteKey` to partition analytics by website. Use the returned `SearchResults.Analytics.TrackingReference` to post consented clicks with the npm package `@ihorleleka/umbraco-search-analytics`.
-
-5. Configure Search Insights under `SearchSettings:Analytics`:
-
-```json
-"SearchSettings": {
-  "Analytics": {
-    "Enabled": true,
-    "EnableBackgroundProcessing": true,
-    "CaptureQueryText": true,
-    "QueueCapacity": 2000,
-    "FlushInterval": "00:00:01",
-    "TrackingReferenceLifetime": "01:00:00",
-    "RawEventRetention": "90.00:00:00",
-    "EnableAzureTelemetry": false,
-    "AzureTelemetryImportInterval": "00:05:00",
-    "SynonymFieldNames": ["searchTitle"]
-  }
-}
-```
-
-Important SSR/hydration note: `SearchResults.Analytics.TrackingReference` is generated per executed search call. If your app performs the same search during SSR and then executes it again during hydration, analytics will count both. Reuse SSR search data on hydration to avoid duplicate analytics. Analytics is requested only when `SearchParameters.Analytics` (or `SearchRequest.Analytics`) is supplied; set `CaptureAnalytics = false` inside that object for non-user-visible/system calls.
-
-## Quick Start
-
-Here's the simplest way to get started.
-
-1.  **Install the package** and configure your services and `appsettings.json` (see [Configuration](#configuration)).
-2.  **Inject `ISearchService`** into your controller or service.
-3.  **Perform a search:**
-
-```csharp
-// Inject the search service
-private readonly ISearchService _searchService;
-
-public MyController(ISearchService searchService)
-{
-    _searchService = searchService;
-}
-
-// Perform a basic search
-public async Task<IActionResult> Search(string query)
-{
-    var searchParameters = new SearchParameters
-    {
-        FullTextSearch = new FullTextSearch(query),
-        Take = 20
-    };
-
-    var results = await _searchService.SearchAsync<CommonSearchItemModel>(searchParameters);
-
-    // 'results' now contains the top 20 hits for the query.
-    // You can access properties like results.Items, results.Total, etc.
-
-    return View(results);
-}
-```
-
-## Configuration
-
-> [!NOTE]
-> This library attaches to existing Umbraco indexes (e.g., `ExternalIndex`, `InternalIndex`). It does not create new indexes.
-
-### 1. Service Registration
-
-In your `Program.cs`, register the services by calling `AddServiceAttributeBasedDependencyInjection`.
-
-```csharp
-// Program.cs
 builder.AddServiceAttributeBasedDependencyInjection(options =>
 {
-    options.AddFeature(SearchOptions.Lucene);
-    // or options.AddFeature(SearchOptions.Azure);
+    options.AddFeature(SearchOptions.Lucene);   // or SearchOptions.Azure
 });
 ```
 
-### 2. AppSettings
+The extension comes from `IL.AttributeBasedDI` (`using IL.AttributeBasedDI.Extensions;`).
 
-Add a `SearchSettings` section to your `appsettings.json`.
+## Configure
 
-<details>
-<summary><strong>Example `appsettings.json`</strong></summary>
+Add a `SearchSettings` section to `appsettings.json` and keep secrets in secret storage:
 
 ```json
 "SearchSettings": {
-  "LicenseToken": "YOUR_LICENSE_TOKEN",
   "DefaultIndexName": "ExternalIndex",
-  "Indexes": [
-    "ExternalIndex",
-    "InternalIndex"
-  ],
-  "ReadOnly": false,
-  "PreviewIndexes": ["InternalIndex"],
-  "CustomIndexSuffix": "Dev|Staging|DeveloperMachine|None",
-  "EnableBlueGreenIndexing": false,
-  "DisableSwapDelay": false,
-  "EnableTaxonomyFacetExpansion": false,
-  "EnableTaxonomyFiltersExpansion": false,
-  "Azure": {
-    "ServiceUrl": "YOUR_AZURE_SEARCH_SERVICE_URL",
-    "ApiKey": "YOUR_AZURE_SEARCH_API_KEY",
-    "UseHybridSearch": false,
-    "UseChunkedVectorSearch": false,
-    "ChunkedVectorMinTokens": 2000,
-    "ChunkedVectorMaxTokens": 3000,
-    "ChunkedVectorOverlapTokens": 200,
-    "ChunkedVectorEmbeddingMaxConcurrency": 4,
-    "BackgroundEmbeddingsProcessing": false,
-    "DocumentBatchMaxActions": 100,
-    "DocumentBatchMaxPayloadBytes": 14680064,
-    "DocumentBatchFlushIntervalMilliseconds": 250,
-    "DocumentBatchQueueCapacity": 2000,
-    "DocumentBatchMaxRetries": 3,
-    "BackgroundEmbeddingsMaxConcurrency": 4
-  },
-  "OpenAi": {
-    "ApiKey": "YOUR_OPENAI_API_KEY",
-    "ServiceUrl": "YOUR_OPENAI_SERVICE_URL",
-    "EmbeddingsDeploymentName": "text-embedding-3-large"
-  }
+  "Indexes": ["ExternalIndex", "InternalIndex"],
+  "PreviewIndexes": ["InternalIndex"]
 }
 ```
 
-</details>
+For Azure also set `LicenseToken` and `Azure:ServiceUrl` / `Azure:ApiKey` (and `OpenAi:*` for hybrid search). Azure requires a valid license token and valid Azure settings at startup; Lucene needs no license. Every setting and its default is in the [configuration reference](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search/references/configuration.md).
 
-### Configuration Details
+## Your first search
 
-- **LicenseToken:** Required when using the Azure feature; Lucene does not require a license token.
-- **DefaultIndexName:** The default index to use if not specified in a search.
-- **CustomIndexSuffix:** Allows to specify custom suffix applied to all of your configured indexes. Optional.
-- **Indexes**: A list of search index names to be used. Defaults to `["ExternalIndex"]`.
-- **PreviewIndexes**: A list of search index names where soft deletion is enabled.
-- **Azure:** Azure Search service credentials.
-- **OpenAi:** OpenAI credentials for vector embeddings.
-- **Azure.UseHybridSearch:** Enables vector + keyword hybrid search.
-- **Azure.UseChunkedVectorSearch:** Enables chunk-level multi-vector indexing in Azure in addition to the averaged vector.
-- **Azure.ChunkedVectorMinTokens / MaxTokens / OverlapTokens:** Controls chunk granularity used for chunk-level vectors.
-- **Azure.ChunkedVectorEmbeddingMaxConcurrency:** Max parallel OpenAI embedding requests per indexed item when chunk vectors are generated.
-- **Azure.BackgroundEmbeddingsProcessing:** Enables durable background processing for both average and chunk vectors. Azure document writes are batched and become eventually consistent. Defaults to `false`; when enabled, both vector fields may be unavailable briefly after indexing.
-- **Azure.DocumentBatchMaxActions / DocumentBatchMaxPayloadBytes / DocumentBatchFlushIntervalMilliseconds:** Bounds each Azure merge-or-upload batch by action count, serialized payload size, and maximum wait time. Defaults are `100`, `14680064` (14 MiB), and `250` ms.
-- **Azure.DocumentBatchQueueCapacity:** Maximum accepted-but-not-yet-sent document writes. When full, indexing waits for capacity instead of creating unbounded in-memory work. Defaults to `2000`.
-- **Azure.DocumentBatchMaxRetries:** Retry limit for transient Azure indexing failures (`408`, `429`, and `5xx`). Defaults to `3`; permanent action failures are logged and reported by rebuild flush.
-- **Azure.BackgroundEmbeddingsMaxConcurrency:** Maximum number of independent durable vector jobs processed concurrently. Defaults to `4`.
-- **Analytics:** Optional Search Insights settings under `SearchSettings:Analytics` when `SearchOptions.Analytics` is enabled (see `src/UmbracoSearch.Analytics/README.md` for full options and behavior).
-- **ReadOnly:** Disallows runtime to create or modify existing index in any way.
-- **EnableBlueGreenIndexing:** Allows to enable b/g indexing behavior when rebuilding index, so that old functional index temporary remains available for search operations.
-- **DisableSwapDelay:** System will delay index swap to allow for indexing to be finalized (1 min per 1000 items of delay); you can disable this behavior with this flag (probably for dev/test purpose).
-- **EnableTaxonomyFacetExpansion:** Enables hierarchical taxonomy facet expansion for `TaxonomyTags` values. Keep disabled if you want to work with raw facet values only.
-- **EnableTaxonomyFiltersExpansion:** When taxonomy facet expansion is enabled, rewrites taxonomy `OR` filters so values from different category paths are split into separate filter groups.
-
-## Basic Usage
-
-To perform a search, inject `ISearchService` and call `SearchAsync` with a `SearchParameters` object.
+Inject `ISearchService` and call `SearchAsync`:
 
 ```csharp
-var searchParameters = new SearchParameters
-{
-    FullTextSearch = new FullTextSearch("umbraco", useHybridSearch: true),
-    Skip = 0,
-    Take = 10,
-    Aliases = new[] { "contentPage" },
-    SearchOrderings = new List<ISearchOrdering>
-    {
-        ISearchOrdering.ByScore(OrderingType.Descending),
-        ISearchOrdering.ByField(IndexingConstants.ComputedIndexFields.SearchDate, OrderingType.Descending)
-    },
-    Filters =
-    [
-        ISearchFilter.FilterForCollectionField(
-            IndexingConstants.ComputedIndexFields.NodeTypeAlias,
-            "contentPage"),
-        ISearchFilter.FilterFor(
-            IndexingConstants.ComputedIndexFields.UmbracoNodeIdInt,
-            1234),
-        ISearchFilter.FilterForCollectionField(
-            IndexingConstants.ComputedIndexFields.TaxonomyTags,
-            "Category__SubCategory__TagName")
-    ],
-    FacetOn = new List<FacetOn>
-    {
-        new FacetOn(IndexingConstants.ComputedIndexFields.TaxonomyTags)
-    },
-    LanguageIsoCode = "en-US"
-};
-
-var searchResults = await searchService.SearchAsync<CommonSearchItemModel>(searchParameters);
-```
-
-### Taxonomy Indexing and Faceting
-
-The taxonomy helpers let you index a full taxonomy path once and then facet/filter on category levels separately from final tag values.
-
-#### Indexing taxonomy values
-
-Use `AddTaxonomyValue` during indexing. Each call accepts path segments and stores:
-- full value in `TaxonomyTags` as `"__"`-joined path (for example `Category__SubCategory__Tag`)
-- category-only path in `TaxonomyCategories` (for example `Category__SubCategory`)
-
-```csharp
-indexingObject
-    .AddTaxonomyValue("Category", "SubCategory", "TagName")
-    .AddTaxonomyValue("Category", "SubCategory", "TagName2");
-```
-
-You can also target custom taxonomy fields without changing existing calls:
-
-```csharp
-indexingObject.AddTaxonomyValue(
-    taxonomyTagsField: CustomIndexingConstants.ProductTags,
-    taxonomyCategoriesField: CustomIndexingConstants.ProductTagGroups,
-    "Category", "SubCategory", "TagName");
-```
-
-#### Enabling hierarchical facet expansion
-
-Set the following appsetting to `true`:
-
-```json
-"SearchSettings": {
-  "EnableTaxonomyFacetExpansion": true,
-  "EnableTaxonomyFiltersExpansion": true
-}
-```
-
-When enabled, the shared search pipeline expands taxonomy facets into a hierarchy:
-- the root `Facet` is always bound to `TaxonomyCategories`
-- `Facet.ChildFacetsIndexFieldName` tells you which field to use for the next level
-- intermediate category nodes use `TaxonomyCategories`
-- terminal tag nodes use `TaxonomyTags`
-
-When `EnableTaxonomyFiltersExpansion` is also enabled, taxonomy filters with `FilteringBehavior.Or` are normalized by category path before execution. For example:
-
-```csharp
-ISearchFilter.FilterFor(
-    IndexingConstants.ComputedIndexFields.TaxonomyTags,
-    FilteringBehavior.Or,
-    "Category1__Tag1",
-    "Category2__Tag2",
-    "Category2__Tag3")
-```
-
-is internally rewritten into two `OR` filters:
-- `["Category1__Tag1"]`
-- `["Category2__Tag2", "Category2__Tag3"]`
-
-This keeps same-category values grouped together while avoiding a single broad `OR` across unrelated taxonomy branches.
-
-The top-level facet now exposes `Values` instead of a flat `Values` collection, and nested `FacetOption.Values` can be used to render sub-categories and tags.
-
-Example hierarchy for `Category__SubCategory__TagName` and `Category__SubCategory__TagName2`:
-
-```json
-[
-  {
-    "Label": "Category",
-    "IndexFieldName": "computedTaxonomyCategories",
-    "Value": "Category",
-    "HitsCount": 2,
-    "ChildFacetsIndexFieldName": "computedTaxonomyCategories",
-    "Values": [
-      {
-        "Label": "SubCategory",
-        "Value": "Category__SubCategory",
-        "HitsCount": 2,
-        "ChildFacetsIndexFieldName": "computedTaxonomyTags",
-        "Values": [
-          {
-            "Label": "TagName",
-            "Value": "Category__SubCategory__TagName",
-            "HitsCount": 1
-          },
-          {
-            "Label": "TagName2",
-            "Value": "Category__SubCategory__TagName2",
-            "HitsCount": 1
-          }
-        ]
-      }
-    ]
-  }
-]
-```
-
-```csharp
-var searchParameters = new SearchParameters
-{
-    FacetOn = [new FacetOn(IndexingConstants.ComputedIndexFields.TaxonomyTags)],
-    Filters =
-    [
-        // Drill down by category path
-        ISearchFilter.FilterForCollectionField(IndexingConstants.ComputedIndexFields.TaxonomyCategories,
-            "Category__SubCategory")
-    ]
-};
-```
-
-### The `SearchParameters` Object
-
-This object allows you to define your query:
-
-- **FullTextSearch:** The full-text search query. Set `BoostExactPhrase = true` to OR the complete unquoted input as an exact phrase with a boost of 10; inputs that already contain double quotes retain their existing quoted-query behavior.
-- **Skip/Take:** For pagination.
-- **Aliases:** Filter by document type aliases.
-- **SearchOrderings:** Define how to sort results.
-- **Filters:** Apply filters to the search.
-- **FacetOn:** Request facet counts for specific fields.
-- **ExtraBoostingOptions:** Boost the score of certain documents.
-- **IndexName:** Specify which index to search.
-- **Root:** Restrict the search to a subtree by node ID or node key.
-- **LanguageIsoCode:** The culture to search in.
-- **Analytics:** Optional analytics request. Analytics is not requested unless this object is supplied; set `CaptureAnalytics = false` inside it to skip capture for that call.
-- **EngineSpecific:** Optional escape hatch for engine-specific request customization right before execution.
-
-Example:
-
-```csharp
-var searchParameters = new SearchParameters
+var results = await searchService.SearchAsync<CommonSearchItemModel>(new SearchParameters
 {
     FullTextSearch = new FullTextSearch("umbraco"),
-    Root = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-    EngineSpecific =
-    {
-        AzureRequestOverride = options =>
-        {
-            // Modify Azure SearchOptions right before SearchAsync executes
-        },
-        LuceneRequestOverride = query =>
-        {
-            // Modify the underlying LuceneSearchQuery right before native Lucene execution
-        }
-    }
-};
-```
-
-Both overrides are nullable and are invoked as `action?.Invoke(...)`.
-
-### Search Result Field Projections
-
-The package provides two concrete common result bases with the same common properties (`Id`, `NodeName`, `SearchTitle`, `SearchDescription`, `SearchContent`, `SearchDate`, and `Url`):
-
-- `CommonSearchItemModel` is the normal, unprojected base and preserves all-fields retrieval.
-- `CommonSearchResultProjection` is the projected base and is intended for projection hierarchies.
-
-They are convenience models, not a required inheritance path. Consumers can define their own `SearchResultModelBase`-derived bases; mark any custom base intended to participate in a projection hierarchy as `partial` with `[SearchResultFieldProjection]`.
-
-For models with a small, known field set, mark a partial class with `[SearchResultFieldProjection]`:
-
-```csharp
-[SearchResultFieldProjection]
-public partial class ProductSearchResultModel : SearchResultModelBase
-{
-    private static readonly IndexFieldDefinition<string> ProductName =
-        IndexFieldDefinitionFactory.ForString("productName");
-
-    private static readonly IndexFieldDefinition<int> StockLevel =
-        IndexFieldDefinitionFactory.ForInt("stockLevel");
-
-    public string? Name => ValueFor(ProductName);
-    public int Stock => ValueFor(StockLevel);
-}
-```
-
-The bundled source generator finds fields passed to `ValueFor(...)`, `ValueForAs(...)`, and methods explicitly marked with `[SearchResultFieldAccessor]`. It generates the model's static `RequiredIndexFields` property, which fulfills `ISearchResultFieldProjection`'s static contract.
-Do not declare that interface or the static member manually; applying the attribute to a partial model is the only opt-in mechanism.
-The attribute is direct-only: an unmarked derived model does not inherit its base model's projection and keeps all-fields retrieval.
-When projected models span assemblies, a derived projected model composes the `RequiredIndexFields` member of its nearest metadata base. The package provides the partial `[SearchResultFieldProjection]` `CommonSearchResultProjection` for that purpose, while `CommonSearchItemModel` remains an ordinary unprojected model. Its fields flow through an intermediate global model to a feature model without manual repetition or interface declarations.
-
-Every hierarchy level that must itself be a reusable projection base must be `partial` and directly marked with `[SearchResultFieldProjection]`. If `A` is marked but inherits an unmarked, non-partial `B`, the generator composes from the next marked ancestor `C`; it includes fields declared in `B` only when `B` is source-visible in A's compilation. Do not rely on that fallback across project/package boundaries—mark `B` as well when its fields must be carried into further derived projections.
-
-The projection is the model's declaration of the index data it consumes. Search providers use it to request only those fields, including localized and invariant fallback names. A model without the attribute keeps the normal all-fields behavior.
-
-`ValueFor` resolves a field only when the corresponding model property is read. Scalar values and multi-value fields such as arrays and lists are materialized on demand; `ValueForAs<T>` remains the escape hatch for serialized or custom values.
-
-Implementation note: Azure applies the projection to its selected fields. Lucene executes the built native query, loads the projection's stored fields, and collects requested facets in that same result search.
-
-## Minimal API Endpoints
-
-The package includes opt-in minimal API registrations for teams that want a ready-made HTTP surface on top of `ISearchService`.
-
-```csharp
-app.UseSearch();
-app.UseSuggestionsSearch();
-```
-
-Default paths:
-
-- search: `/api/search`
-- suggestions: `/api/search/suggest`
-
-Both endpoints can be customized at registration time:
-
-```csharp
-app.UseSearch(options =>
-{
-    options.Path = "/custom/search";
-    options.SearchParametersOverride = static (httpContext, request, parameters, cancellationToken) =>
-    {
-        parameters.Aliases = ["contentPage"];
-        return ValueTask.FromResult(parameters);
-    };
-});
-
-app.UseSuggestionsSearch(options =>
-{
-    options.Path = "/custom/search/suggest";
-    options.SuggestionSettingsOverride = static (httpContext, request, parameters, cancellationToken) =>
-    {
-        parameters.Size = Math.Min(parameters.Size, 5);
-        return ValueTask.FromResult(parameters);
-    };
+    Aliases = ["contentPage"],
+    LanguageIsoCode = "en-US",
+    Skip = 0,
+    Take = 20,
+    SearchOrderings =
+    [
+        ISearchOrdering.ByScore(OrderingType.Descending),
+        ISearchOrdering.ByField(IndexingConstants.ComputedIndexFields.SearchDate, OrderingType.Descending)
+    ]
 });
 ```
 
-If you want the same endpoint behavior with a different search result model, use the generic overloads:
+`results.Items` holds the hits, `results.TotalItemCount` the total and `results.Facets` any requested facets. `Take` defaults to `int.MaxValue`, so always set it, especially for public input.
 
-```csharp
-app.UseSearch<MySearchItemModel>();
-app.UseSuggestionsSearch<MySearchItemModel>();
-```
+## Learn more
 
-The default request contracts are `SearchRequest` and `SuggestionsSearchRequest`. They are mapped onto `SearchParameters` and `SuggestionSettings`, and any unknown field names are ignored by default. When the optional analytics package is enabled and `SuggestionsSearchRequest.Analytics` is supplied, the response is a `SuggestionResult<SuggestionResultItem<T>>` envelope containing analytics metadata, total count, and the returned suggestion items.
+Each topic has one reference page:
 
-## MCP Tools
+| Topic | Page |
+| --- | --- |
+| Registration and every `SearchSettings` option | [configuration](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search/references/configuration.md) |
+| `SearchParameters`, filters, facets, suggestions, taxonomy, languages, result models and projections | [querying](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search/references/querying.md) |
+| Custom fields, converters, external data, scoring profiles | [indexing](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search/references/indexing.md) |
+| Azure lifecycle, blue/green rebuilds, hybrid and chunk vectors, background embeddings | [azure-and-vectors](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search/references/azure-and-vectors.md) |
+| Search endpoints and MCP tools | [endpoints-and-mcp](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search/references/endpoints-and-mcp.md) |
+| Diagnosis order and definition of done | [troubleshooting](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search/references/troubleshooting.md) |
+| Framework pairing, dependency ranges, breaking changes | [compatibility and upgrade](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search/references/compatibility-and-upgrade.md) |
 
-The package includes opt-in Model Context Protocol tool registration for exposing search to MCP clients.
+## Optional features
 
-Built-in tools:
+- **Backoffice document search:** add `SearchOptions.BackofficeDocumentSearch` next to your engine to route only the Umbraco backoffice document search through `InternalIndex`. Start-node rules are kept; media, member and other entity searches keep Umbraco's own implementation.
+- **Search Insights:** install `IL.UmbracoSearch.Analytics` and add `SearchOptions.Analytics` next to exactly one engine; see its README and the [analytics skill](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search-analytics/SKILL.md).
 
-- `fetchAvailableIndexes`: returns `DefaultIndexName`, `Indexes`, and `PreviewIndexes` from `SearchSettings`.
-- `search`: runs a default content search with `(string? indexName, string? q, int top_k = 5)`.
+## For AI coding agents
 
-Register the tools directly from `builder.Services`:
-
-```csharp
-using IL.UmbracoSearch.Search.Mcp;
-
-builder.Services
-    .AddUmbracoSearchMcpTools()
-    .WithHttpTransport();
-
-app.MapMcp("/searchMcp");
-```
-
-Or add the tools to an existing MCP server builder:
-
-```csharp
-builder.Services
-    .AddMcpServer()
-    .WithHttpTransport()
-    .WithUmbracoSearchTools();
-
-app.MapMcp("/searchMcp");
-```
-
-`AddUmbracoSearchMcpTools()` and `WithUmbracoSearchTools()` register the IL.UmbracoSearch MCP service and add the package tools. The package does not force a transport; configure the MCP transport in the consuming app. For an HTTP MCP endpoint, add the MCP ASP.NET Core package in the web app and configure transport/routing there.
-
-The default `search` tool maps `q` to `FullTextSearch`, `indexName` to `SearchParameters.IndexName`, and clamps `top_k` to `1..50`. When `SearchSettings.Azure.UseHybridSearch` is enabled, MCP search also enables hybrid full-text search by default. It returns common result fields: `id`, `title`, `description`, `url`, `languageIsoCode`, plus `additionalData`.
-
-Customize the default query or map each returned item:
-
-```csharp
-builder.Services.AddUmbracoSearchMcpTools(options =>
-{
-    options.SearchParametersOverride = static (request, parameters, cancellationToken) =>
-    {
-        parameters.Aliases = ["contentPage"];
-        return ValueTask.FromResult(parameters);
-    };
-
-    options.ResultMapper = static (context, cancellationToken) =>
-        ValueTask.FromResult(new McpSearchItem
-        {
-            Id = context.Item.Id,
-            Title = context.Item.SearchTitle ?? context.Item.NodeName,
-            Description = context.Item.SearchDescription,
-            Url = context.Item.Url,
-            AdditionalData = new Dictionary<string, object?>
-            {
-                ["nodeName"] = context.Item.NodeName,
-                ["requestedIndex"] = context.Request.IndexName
-            }
-        });
-}).WithHttpTransport();
-```
-
-Use a custom strongly typed search result model when you want the mapper to work with your own result properties or `ValueFor(...)` calls:
-
-```csharp
-builder.Services
-    .AddUmbracoSearchMcpTools<ProductSearchItem>(options =>
-    {
-        options.ResultMapper = static (context, cancellationToken) =>
-            ValueTask.FromResult(new McpSearchItem
-            {
-                Id = context.Item.ProductId,
-                Title = context.Item.ValueFor(CustomIndexingConstants.ProductName),
-                AdditionalData = new Dictionary<string, object?>
-                {
-                    ["sku"] = context.Item.ValueFor(CustomIndexingConstants.ProductSku)
-                }
-            });
-    })
-    .WithHttpTransport();
-```
-
-For a fully custom MCP search implementation, replace/decorate `IUmbracoSearchMcpService` in DI. The MCP tool layer calls that service for both `fetchAvailableIndexes` and `search`.
-
-Rate limiting should be configured in the consuming app, CDN, or hosting layer because that layer owns the MCP transport, endpoint routing, authentication, and client identity. For an ASP.NET Core fixed-window limit on the MCP endpoint:
-
-```csharp
-builder.Services.AddRateLimiter(options =>
-{
-    options.AddFixedWindowLimiter("umbraco-search-mcp", limiter =>
-    {
-        limiter.PermitLimit = 60;
-        limiter.Window = TimeSpan.FromMinutes(1);
-        limiter.QueueLimit = 0;
-    });
-});
-
-builder.Services
-    .AddUmbracoSearchMcpTools()
-    .WithHttpTransport();
-
-app.UseRateLimiter();
-
-app.MapMcp("/searchMcp")
-    .RequireRateLimiting("umbraco-search-mcp");
-```
-
-### Filter API
-
-Use the filter helper that matches the field shape:
-
-- `ISearchFilter.FilterFor(...)` for scalar `IndexFieldDefinition<T>` fields.
-- `ISearchFilter.FilterForCollectionField(...)` for collection fields such as `IndexFieldDefinition<string[]>`, `IndexFieldDefinition<int[]>`, `IndexFieldDefinition<List<string>>`, etc.
-- `ISearchFilter.FilterFor(IIndexFieldDefinition, ...)` as a dynamic fallback when the field is only known at runtime, for example after looking it up by name.
-- `ISearchFilter.And(...)`, `ISearchFilter.Or(...)`, and `ISearchFilter.Not(...)` when you need to combine single-field filters into a more advanced expression.
-
-Examples:
-
-```csharp
-Filters =
-[
-    ISearchFilter.FilterFor(CustomIndexingConstants.ProductName, "My Product"),
-    ISearchFilter.FilterFor(IndexingConstants.ComputedIndexFields.UmbracoNodeIdInt, 123),
-    ISearchFilter.FilterForCollectionField(CustomIndexingConstants.ProductCategories, "Category1", "Category2")
-];
-```
-
-Each `FilterFor(...)` or `RangeFilterFor(...)` leaf targets a single field. When you need cross-field logic, compose leaves explicitly instead of putting multiple fields into one filter body:
-
-```csharp
-var filter = ISearchFilter.And(
-    ISearchFilter.FilterFor(CustomIndexingConstants.ProductName, "My Product"),
-    ISearchFilter.Not(ISearchFilter.FilterFor(IndexingConstants.ComputedIndexFields.ItemType, "archived")));
-```
-
-When you have only `IIndexFieldDefinition` available, use the non-generic fallback:
-
-```csharp
-IIndexFieldDefinition field = GetFieldByName("custom_productCategories");
-var filter = ISearchFilter.FilterFor(field, "Category1", "Category2");
-```
-
-The package includes analyzers that fail the build when the wrong strongly-typed helper is used:
-
-- `ILUS0002`: `FilterFor(...)` used with a collection field
-- `ILUS0003`: `FilterForCollectionField(...)` used with a scalar field
-
-`Root` accepts all of these forms:
-
-```csharp
-Root = 123;
-Root = "123";
-Root = Guid.Parse("11111111-1111-1111-1111-111111111111");
-```
-
-## Advanced Usage
-
-### Advanced `SearchApiController` Example
-
-For a complete example of how to build a search query from URL parameters, see the controller below. It handles parsing filters, ordering, facets, and more from the query string.
-
-An example URL for this controller would be:
-`/Search/Search?q=umbraco&filters=__NodeTypeAlias:contentPage&orderBy=score:desc`
-
-<details>
-<summary><strong>`SearchApiController` Code</strong></summary>
-
-```csharp
-public class SearchApiController(ISearchService searchService, IIndexService indexService) : Controller
-{
-    [HttpGet]
-    public async Task<IActionResult> Search([FromQuery] string q = "",
-        [FromQuery] bool useHybridSearch = false,
-        [FromQuery] string? filters = null,
-        [FromQuery] string? orderBy = null,
-        [FromQuery] string? facetOn = null,
-        [FromQuery] string? boostById = null,
-        [FromQuery] int skip = 0,
-        [FromQuery] int take = int.MaxValue,
-        [FromQuery] int? root = null,
-        [FromQuery] string? indexName = null,
-        [FromQuery] string? lang = null
-    )
-        =>
-                        new JsonResult(await searchService.SearchAsync<CommonSearchItemModel>(
-                    new SearchParameters
-                    {
-                        FullTextSearch = new FullTextSearch(q, useHybridSearch: useHybridSearch)
-                        {
-                            VectorSimilarityThreshold = 0.3f,
-                        },
-                        Aliases = [ContentPage.ModelTypeAlias],
-                        Filters = TryBuildFilters(filters, indexName),
-                        FacetOn = TryBuildFacetOn(facetOn, indexName),
-                        SearchOrderings = TryBuildSearchOrderings(orderBy, indexName),
-                        ExtraBoostingOptions = TryBuildExtraBoostingOptions(boostById),
-                        Skip = skip,
-                        Take = take,
-                        Root = root,
-                        IndexName = indexName,
-                        LanguageIsoCode = lang
-                    }));
-
-    // Helper methods for parsing query string parameters...
-}
-```
-
-</details>
-
-### Multi-Language Support
-
-The package supports multi-language indexing and search. The system automatically creates language-specific fields (e.g., `productName_en`, `productName_de`).
-
-Multi-language fields can be defined via factory methods using `isMultiLanguage: true` (for example `IndexFieldDefinitionFactory.ForString(..., isMultiLanguage: true)`).
-
-Set the `LanguageIsoCode` property in `SearchParameters` to search in a specific language.
-
-The library now normalizes and resolves language values consistently across indexing and search:
-- `en`, `en-GB`, and `en_GB` are all accepted
-- field suffixes are generated in a consistent `_en_gb` format
-- if the exact language is not configured but a partial match exists, the closest configured language is used
-- if the input cannot be matched at all, the system falls back to the default configured language during search
-
-### Hybrid And Granular Vectorization Notes
-
-- The existing averaged vector behavior is preserved for large sources (source is chunked and embeddings are averaged).
-- Chunk-level vectors are generated only when `UseChunkedVectorSearch` is enabled.
-- Small documents (below token threshold used for single-pass embedding) are short-circuited to average-only vector storage; chunk vectors are skipped to reduce indexing/storage volume.
-- Reindexing unchanged content does not regenerate chunk vectors: cache invalidation uses a hash of the full source content used for vectorization.
-- Chunk planning metadata (tokenization/chunk split result) is cached by source hash and chunk settings to avoid repeated re-tokenization work across reindex operations.
-- Azure multi-vector fields currently allow up to 100 vectors per document (across complex collection vector fields). If configured chunk granularity would exceed this quota, the system automatically increases effective chunk size and logs a warning.
-- When `BackgroundEmbeddingsProcessing` is enabled, indexing events enqueue bounded Azure document writes instead of waiting for Azure. Rebuild completion drains those document batches, but average and chunk vector enrichment remains eventually consistent.
-
-### Granular Chunk Size Recommendations
-
-Choose chunking based on retrieval quality needs and expected content size:
-
-- **Balanced default (recommended for most sites):** `Min=2000`, `Max=3000`, `Overlap=200`
-- **Higher precision semantic matching (short sections, FAQs, product specs):** `Min=600`, `Max=900`, `Overlap=100`
-- **Very granular matching (only when you need narrow passage recall):** `Min=400`, `Max=500`, `Overlap=50`
-- **Long-form content efficiency (large articles/docs, lower indexing cost):** `Min=2500`, `Max=4000`, `Overlap=200`
-
-Notes:
-- More granular chunks increase vector count and indexing/storage cost.
-- If your chosen values would create more than 100 chunk vectors for an item, the system increases chunk size automatically to stay within quota and logs:
-  `system had to increase chunk size because otherwise vectors count exceeds quota (100)`.
-
-## Customizing the Index
-
-You can add your own custom fields to the search index by implementing the `IIndexingConverter` interface.
-
-> [!IMPORTANT]
-> `IndexFieldDefinition` constructors are no longer part of the public API.
-> Always create field definitions through `IndexFieldDefinitionFactory` (`ForString`, `ForStringArray`, `ForInt`, `ForBool`, `Custom` or `AutoDetection`).
-
-### The `IIndexingConverter` Interface
-
-A class implementing this interface allows you to:
-
-- **`GetIndexFieldDefinitions()`**: Return a collection of `IIndexFieldDefinition` objects that define your custom fields.
-- **`AddContentComputedFieldsAsync(..., IndexingItemContext context, CancellationToken)`**: Asynchronously add computed values to your custom fields for each document being indexed.
-- **`AddMediaComputedFieldsAsync(..., IndexingItemContext context, CancellationToken)`**: Do the same for media items.
-- **`RunForIndexes()`**: Specify which indexes the converter should run for.
-
-Converters with the same `Order` start together. The next order starts only after all converters in the preceding order have completed.
-
-For Lucene full-text search, caller-supplied `SearchFields` are used unchanged. When no fields are supplied, the search is limited to index-field definitions where `isSearchable` is `true`; configure at least one such field.
-
-### The `IExternalIndexingConverter` Interface
-
-Use this interface when indexing data that does not come from `IPublishedContent` (for example, external systems or pre-aggregated records):
-
-- **`GetIndexFieldDefinitions()`**: Define external fields for both Lucene and Azure schemas.
-- **`GetIndexingModelsAsync(IndexingItemContext context, CancellationToken)`**: Asynchronously return the `ExternalIndexingModel` documents to index during rebuild.
-- **`RunForIndexes()`**: Limit execution to specific configured indexes.
-
-These converters are executed during configured index rebuilds for both Lucene and Azure flows.
-
-`ExternalIndexingModel` requires 3 mandatory fields:
-- `nodeId`
-- `nodeName`
-- `computedExcludedFromSearch`
-
-Embedding wiring:
-- If your external model sets vector content (`SetVectorContent`, `SetVectorContentPrecise`, `SetVectorContentPreciseManual`) and Azure embeddings are enabled, vectors are generated during rebuild (when background embeddings are disabled).
-- When background embeddings are enabled, external models still flow through Azure indexing and can be picked up by the background embedding queue via deterministic node key generation.
-
-### Defining Index Fields
-
-Create field definitions with `IndexFieldDefinitionFactory` and group them in a static constants class.
-
-```csharp
-public static class CustomIndexingConstants
-{
-    public const string CustomFieldPrefix = "custom_";
-
-    // Full-text searchable + sortable string field
-    public static readonly IndexFieldDefinition<string> ProductName =
-        IndexFieldDefinitionFactory.ForString(
-            fieldName: $"{CustomFieldPrefix}productName",
-            isSearchable: true,
-            isFacetable: false,
-            isSortable: true,
-            isFilterable: true);
-
-    // Multi-value string field for filters/facets
-    public static readonly IndexFieldDefinition<string[]> ProductCategories =
-        IndexFieldDefinitionFactory.ForStringArray(
-            fieldName: $"{CustomFieldPrefix}productCategories",
-            isFacetable: true,
-            isFilterable: true);
-
-    // Vector field stored only in Azure (Lucene definition intentionally null)
-    public static readonly IndexFieldDefinition<float[]> ProductVector =
-        IndexFieldDefinitionFactory.Custom<float[]>(
-            luceneFieldDefinition: null,
-            azureFieldDefinition: new VectorSearchField(
-                name: $"{CustomFieldPrefix}productVector",
-                vectorSearchDimensions: 1536,
-                vectorSearchProfileName: "vector-profile"));
-}
-```
-
-### Auto-Discovery with DI Registration Attributes
-
-Decorate your `IIndexingConverter` implementation with `[Service]`, `[ServiceWithOptions]`, or `[Decorator]` so it can be registered by the dependency injection container.
-
-The package now includes analyzer `ILUS0001`, which fails the build for concrete `IIndexingConverter` implementations that do not declare one of these IL.AttributeBasedDI registration attributes.
-
-### Example: Custom Indexing Converter
-
-```csharp
-
-[Service<SearchOptions>(Lifetime = ServiceLifetime.Singleton, Feature = SearchOptions.Lucene | SearchOptions.Azure)]
-public class CustomIndexingConverter : IIndexingConverter
-{
-    public int Order => 100; // Higher order runs after core converters
-
-    public IEnumerable<IIndexFieldDefinition> GetIndexFieldDefinitions()
-    {
-        return new IIndexFieldDefinition[]
-        {
-            CustomIndexingConstants.ProductName,
-            CustomIndexingConstants.ProductCategories
-        };
-    }
-
-    public Task AddContentComputedFieldsAsync(IPublishedContent? publishedContent, IndexingModel indexingObject, IndexingItemContext context, CancellationToken cancellationToken = default)
-    {
-        if (publishedContent != null)
-        {
-            indexingObject.SetComputedValue(CustomIndexingConstants.ProductName, "My Product");
-            indexingObject.SetComputedValue(CustomIndexingConstants.ProductCategories, new[] { "Category1", "Category2" });
-            indexingObject.SetVectorContent("Long text used for vectorization...");
-            indexingObject.SetVectorContentPrecise("Long text used for vectorization (settings-driven chunking)...");
-            indexingObject.SetVectorContentPreciseManual(
-                "Long text used for vectorization (manual chunking)...",
-                minTokens: 600,
-                maxTokens: 900,
-                overlapTokens: 100);
-        }
-
-        return Task.CompletedTask;
-    }
-}
-```
-
-Use dedicated vector helpers:
-- `SetVectorContent(...)`: average-vector content.
-- `SetVectorContentPrecise(...)`: chunk-vector content using `SearchSettings.Azure` chunk settings.
-- `SetVectorContentPreciseManual(...)`: chunk-vector content with per-item manual chunk sizing.
-
-Behavior notes:
-- If granular hybrid search is enabled and `SetVectorContentPrecise(...)` is not called, granular chunk vectors automatically reuse the `SetVectorContent(...)` content with settings-based chunk sizes.
-- `SetVectorContent(...)` and `SetVectorContentPrecise(...)` can use different content values for average-vector and chunk-vector flows.
-
-## Customizing Search Results
-
-### `CommonSearchItemModel`
-
-The default `CommonSearchItemModel` provides access to common fields like `Id`, `NodeName`, `SearchTitle`, `SearchDescription`, `Url`, etc.
-
-`CommonSearchResultProjection` provides the same concrete common-result shape for a projected hierarchy. Choose it when the model and its descendants should opt into field projection; it is not an abstract base. Consumers can instead define their own bases.
-
-### Custom Models with `ValueFor<T>`
-
-For custom data, create your own search result model by inheriting from `SearchResultModelBase`. Use the `ValueFor<T>(IndexFieldDefinition<T> fieldDefinition)` method to retrieve values from the index.
-
-```csharp
-public class ProductSearchResultModel : SearchResultModelBase
-{
-    public string ProductName => ValueFor(CustomIndexingConstants.ProductName) ?? string.Empty;
-    public string[] Categories => ValueFor(CustomIndexingConstants.ProductCategories) ?? Array.Empty<string>();
-}
-```
-
-This approach provides strongly-typed properties for your custom fields while allowing dynamic access to any indexed field.
-
-## Built-in Indexing Constants
-
-The library provides a set of pre-defined constants for common Umbraco fields in `IndexingConstants.ComputedIndexFields`. You can reuse these in your queries and converters.
-
-<details>
-<summary><strong>List of `IndexingConstants.ComputedIndexFields`</strong></summary>
-
-```csharp
-public static class IndexingConstants
-{
-    public static class ComputedIndexFields
-    {
-        public const string ComputedFieldNameCommonPrefix = "computed";
-
-        public static readonly IndexFieldDefinition<int> UmbracoNodeIdInt =
-            IndexFieldDefinitionFactory.ForInt("intNodeId", isFacetable: false);
-
-        public static readonly IndexFieldDefinition Url =
-            IndexFieldDefinitionFactory.ForString(
-                $"{ComputedFieldNameCommonPrefix}{nameof(Url)}",
-                isFacetable: false,
-                isSortable: true,
-                isRaw: true,
-                isMultiLanguage: true);
-
-        public static readonly IndexFieldDefinition<float[]> VectorSearchContent =
-            IndexFieldDefinitionFactory.Custom<float[]>(
-                luceneFieldDefinition: null,
-                azureFieldDefinition: new VectorSearchField(
-                    $"{ComputedFieldNameCommonPrefix}{nameof(VectorSearchContent)}",
-                    1536,
-                    "vector-profile"));
-    }
-}
-```
-
-</details>
+Install or point your agent at the [`umbraco-search` skill](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search/SKILL.md) (and [`umbraco-search-analytics`](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search-analytics/SKILL.md) when the analytics package is used). Each skill is a short contract summary plus the reference pages above, so an agent can build search features without access to the package source.

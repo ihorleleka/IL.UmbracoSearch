@@ -1,296 +1,77 @@
 # IL.UmbracoSearch.Analytics
 
-Optional Search Insights for IL.UmbracoSearch. This package targets **.NET 10 with Umbraco 17.8.1+ (<18)** and **.NET 11 with Umbraco 18.3.1+ (<19)**. Both targets use EF Core 10, matching the Umbraco 17 and 18 persistence dependency line.
+Optional Search Insights for [IL.UmbracoSearch](https://www.nuget.org/packages/IL.UmbracoSearch). It decorates `ISearchService` to record searches and consented result clicks in SQL, and adds a **Search** section to the Umbraco backoffice: overview, queries, content, sessions, Azure synonyms and settings. It never changes query or result behavior.
 
-Starting with `IL.UmbracoSearch` **17.8.0.1**, this is part of the supported runtime baseline: Umbraco 13-16 and .NET 8-9 are not supported.
+Targets **.NET 10 with Umbraco 17.8.1+ (<18)** and **.NET 11 with Umbraco 18.3.1+ (<19)**, matching the main package. Umbraco 13-16 and .NET 8-9 are not supported.
 
-Runtime dependencies use bounded NuGet ranges, including `IL.AttributeBasedDI` `[2.10.1.1, 3.0.0)` and EF Core `[10.0.15, 11.0.0)`. Consumers can select versions within these bounds through direct package references or central package management, subject to the full dependency graph. Bare versions already mean minimums; the explicit upper bound defines the supported major family. The main package README explains the shared runtime dependency policy.
+## Enable
 
-## Enable Analytics
-
-Enable `SearchOptions.Analytics` with exactly one engine:
+Add `SearchOptions.Analytics` next to **exactly one** engine:
 
 ```csharp
-builder.Services.AddUmbracoSearch(SearchOptions.Lucene | SearchOptions.Analytics);
-// or
-builder.Services.AddUmbracoSearch(SearchOptions.Azure | SearchOptions.Analytics);
-```
-
-Analytics decorates `ISearchService`; it does not change query/result semantics.
-Analytics is requested per search by supplying `SearchParameters.Analytics` (or
-`SearchRequest.Analytics` for the built-in endpoint). When requested, capture is
-non-blocking and stores only GUID `UmbracoNodeKey` values for impressions/clicks.
-
-Captured searches return `SearchResults.Analytics`, containing a tracking reference
-and session token. Store the session token in the caller and pass it as
-`AnalyticsRequest.AnalyticsSessionToken` on a later search to group executions as
-one **Search session**. `AnalyticsResponse.TrackingReference` remains distinct for
-every execution and must be used for click tracking. Set the optional
-`AnalyticsRequest.SiteKey` to partition events by website; the backoffice exposes
-that value through the website filter. The response object is null
-when analytics was not requested or is disabled globally. Suggestion responses
-return a `SuggestionResult<SuggestionResultItem<T>>` envelope containing
-`Analytics`, `TotalItemCount`, and the returned suggestion items.
-
-## Session insights
-
-The Search section includes an anonymous **Sessions** view. It reports activity
-only within the selected reporting window: searches per session, refined-session
-rate, paginated journeys, and frequent query-to-query refinements. It never
-returns or displays `AnalyticsSessionToken` values.
-
-Journey rows are paginated and only include recent query/click activity. Refinement
-analysis is limited to the most recent 10,000 matching raw events and indicates
-when a wide reporting window is sampled. These insights depend on raw retained
-events and are not available beyond `RawEventRetention`.
-
-Per-call capture opt-out is available through `SearchParameters.Analytics`.
-Set `CaptureAnalytics = false` inside the object on searches that must not be
-captured (for example, server-generated/internal searches).
-
-## Consumer setup checklist
-
-1. Enable Analytics with exactly one engine.
-2. Configure analytics storage.
-3. Map click tracking endpoint (`UseSearchAnalyticsClicks`).
-4. Map backoffice management endpoints (`MapSearchAnalyticsManagement`).
-5. Apply a backoffice authorization policy for Search Insights access.
-6. Install and use the npm click helper package in your front end.
-
-## Configuration
-
-The package binds options from `SearchSettings:Analytics`.
-For backward compatibility, `UmbracoSearch:Analytics` is also accepted when
-`SearchSettings:Analytics` is not present.
-
-```json
+builder.AddServiceAttributeBasedDependencyInjection(options =>
 {
-  "ConnectionStrings": {
-    "UmbracoSearchAnalytics": "Server=...;Database=SearchAnalytics;..."
-  },
-  "SearchSettings": {
-    "Analytics": {
-      "Enabled": true,
-      "EnableBackgroundProcessing": true,
-      "CaptureQueryText": true,
-      "QueueCapacity": 2000,
-      "FlushInterval": "00:00:01",
-      "TrackingReferenceLifetime": "01:00:00",
-      "RawEventRetention": "90.00:00:00",
-      "SynonymFieldNames": ["searchTitle"]
-    }
-  }
-}
+    options.AddFeature(SearchOptions.Lucene);      // or SearchOptions.Azure
+    options.AddFeature(SearchOptions.Analytics);
+});
 ```
 
-Supported `SearchSettings:Analytics` options:
+(`using IL.AttributeBasedDI.Extensions;`.) Any other combination fails at startup. Without `SearchOptions.Analytics` the package is inert.
 
-- `Enabled` — set to `false` on preview/test servers to disable all capture on that node
-- `EnableBackgroundProcessing` — set to `false` on delivery servers in a multi-server setup so only the designated master backend runs periodic tasks (retention purge); capture and ingestion are unaffected
-- `CaptureQueryText`
-- `QueueCapacity`
-- `FlushInterval`
-- `TrackingReferenceLifetime`
-- `RawEventRetention`
-- `ConnectionString` (explicit override)
-- `UseInMemoryStorage` (tests/local experiments only)
-- `SynonymFieldNames`
-
-`CaptureAnalytics` is not an appsetting; it is a per-request flag on
-`AnalyticsRequest`, nested in `SearchParameters.Analytics` (or the default HTTP
-`SearchRequest.Analytics`) for selective capture. The analytics request object is
-nullable and omitted by default.
-
-Storage defaults:
-
-- SQL Server is default.
-- Connection resolution order:
-  1. `SearchSettings:Analytics:ConnectionString`
-  2. `ConnectionStrings:UmbracoSearchAnalytics`
-  3. `ConnectionStrings:umbracoDbDSN`
-- If none are set, startup fails unless `UseInMemoryStorage=true`.
-
-## Database migrations
-
-Generate analytics migrations with EF tooling (`dotnet ef`); do not hand-author
-migration files. Analytics uses its own migrations history table and does not
-modify Umbraco tables.
-
-## Click endpoint and npm helper
-
-Map the consumer-owned click endpoint:
+## Map the endpoints
 
 ```csharp
-app.UseSearchAnalyticsClicks();
+app.UseSearchAnalyticsClicks();                                           // POST /api/search/analytics/click
+app.MapSearchAnalyticsManagement(authorizationPolicy: "SearchInsights");  // /umbraco/api/search-analytics
 ```
 
-Default path: `/api/search/analytics/click`
+Define the `SearchInsights` policy in your host (for example backoffice authentication scheme plus an authenticated user). Without a policy the management endpoints still require a signed-in backoffice user. Your application owns authentication, rate limiting and consent for the click endpoint.
 
-Install helper package:
+## Record searches and clicks
+
+Capture is requested per search:
+
+```csharp
+var results = await searchService.SearchAsync<CommonSearchItemModel>(new SearchParameters
+{
+    FullTextSearch = "umbraco",
+    Take = 10,
+    Analytics = new AnalyticsRequest { AnalyticsSessionToken = sessionToken }
+});
+```
+
+`results.Analytics` returns a `TrackingReference` (use it for clicks) and an `AnalyticsSessionToken` (send it with later searches to form a session). Post consented clicks from the browser with the npm helper:
 
 ```bash
 npm i @ihorleleka/umbraco-search-analytics
 ```
-
-Use the helper:
 
 ```ts
 import { trackSearchResultClick } from '@ihorleleka/umbraco-search-analytics';
 
 await trackSearchResultClick(
   { endpoint: '/api/search/analytics/click', consent: () => hasAnalyticsConsent() },
-  {
-    trackingReference: search.analytics.trackingReference,
-    nodeKey: item.nodeKey,
-    position: index + 1,
-    idempotencyKey: crypto.randomUUID()
-  });
+  { trackingReference, nodeKey: item.nodeKey, position: index + 1, idempotencyKey: crypto.randomUUID() });
 ```
 
-Click payload:
+If the same search runs during server rendering and again on hydration it is counted twice: reuse the server results or set `CaptureAnalytics = false` on the repeat.
 
-- `trackingReference`: from the search response
-- `nodeKey`: Umbraco content GUID (not numeric node ID)
-- `position`: 1-based position shown to the user
-- `idempotencyKey`: unique per click attempt
+## Configure
 
-Endpoint outcomes:
-
-- `202 Accepted` for accepted click
-- `204 No Content` for duplicate click
-- `400 Bad Request` for invalid/expired/non-displayed click
-
-The host owns endpoint authentication, transport security, rate limiting, and consent policy.
-
-## Backoffice management endpoints
-
-Map Search Insights management endpoints:
-
-```csharp
-app.MapSearchAnalyticsManagement(authorizationPolicy: "SearchInsights");
-```
-
-Default base path: `/umbraco/api/search-analytics`
-
-If no policy is supplied, endpoints still require an authenticated Umbraco
-backoffice user via `BackOfficeAuthenticationType`.
-
-Example policy wiring:
-
-```csharp
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("SearchInsights", policy =>
-        policy.AddAuthenticationSchemes(Constants.Security.BackOfficeAuthenticationType)
-              .RequireAuthenticatedUser());
-});
-```
-
-## SSR and hydration guidance
-
-`TrackingReference` is generated per executed search call. If the same logical
-search is executed in SSR and then re-executed during hydration, analytics will
-record two executions.
-
-To avoid duplicate analytics with the current implementation, reuse SSR search
-results during hydration instead of issuing a second identical search call, or
-set `Analytics = new AnalyticsRequest { CaptureAnalytics = false }` on non-user-visible/server-generated searches.
-
-You can also suppress analytics for specific replay/internal searches by setting
-`SearchParameters.Analytics.CaptureAnalytics = false` for those calls.
-
-## Multi-server deployments
-
-In a load-balanced or multi-server setup, use `Enabled` and `EnableBackgroundProcessing`
-to control per-node behaviour:
-
-| Node type | `Enabled` | `EnableBackgroundProcessing` | What runs |
-|---|---|---|---|
-| Master / backoffice server | `true` (default) | `true` (default) | Migrations, retention, capture |
-| Delivery server | `true` (default) | `false` | Capture only |
-| Preview / test server | `false` | *(irrelevant)* | Nothing |
-
-`EnableBackgroundProcessing = false` skips **all** server-side processing on that node:
-database migrations and retention purge. Only the master
-(backoffice) server should run with it set to `true`.
-
-Example delivery server appsettings:
+Options live under `SearchSettings:Analytics`; the connection string comes from `ConnectionStrings:UmbracoSearchAnalytics` (falling back to `umbracoDbDSN`).
 
 ```json
-{
-  "SearchSettings": {
-    "Analytics": {
-      "EnableBackgroundProcessing": false
-    }
-  }
-}
+"SearchSettings": { "Analytics": { "Enabled": true, "EnableBackgroundProcessing": true, "RawEventRetention": "90.00:00:00" } }
 ```
 
-Example preview/test server appsettings:
+On delivery servers of a multi-server setup set `EnableBackgroundProcessing` to `false`; on preview/test servers set `Enabled` to `false`. Migrations are applied automatically on the node that runs background processing.
 
-```json
-{
-  "SearchSettings": {
-    "Analytics": {
-      "Enabled": false
-    }
-  }
-}
-```
+## Learn more
 
-## Safety when the feature is not activated
+| Topic | Page |
+| --- | --- |
+| All options, storage, migrations, multi-server nodes | [setup and configuration](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search-analytics/references/setup-and-configuration.md) |
+| Click endpoint, npm helper, SSR/hydration, consent | [clicks and front end](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search-analytics/references/clicks-and-frontend.md) |
+| Backoffice endpoints, paging and CSV, retention, Azure synonyms | [management and reports](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search-analytics/references/management-and-reports.md) |
 
-If `IL.UmbracoSearch.Analytics` is referenced but `SearchOptions.Analytics` is
-never added during service registration, the package is inert:
-
-- The database migration hosted service exits without running.
-- No background workers start (capture queue, retention).
-- `UseSearchAnalyticsClicks()` and `MapSearchAnalyticsManagement()` map no
-  routes and resolve nothing from the DI container.
-
-## Azure synonyms
-
-Synonym management is Azure-only. Every publication removes Azure synonym maps
-whose names start with `Analytics:SynonymMapPrefix` (default `us-`), creates the
-single shared `${SynonymMapPrefix}library-managed-all` map from the current
-enabled mappings, and refreshes managed active/indexing index definitions. It
-does not upload or reindex content documents. Set distinct prefixes such as
-`staging-us-` and `production-us-` when environments share an Azure Search
-service.
-
-## Local Storybook preview for Search section FE
-
-Use the local Storybook workspace to evolve Search-section UI and fake-data
-states without publishing a new package release.
-
-Workspace path:
-
-- `src/UmbracoSearch.Analytics.Backoffice.Client/`
-
-Backoffice modules are authored in that workspace's `src/` directory. Generate the
-NuGet package assets before packing or testing a UI change:
-
-```bash
-cd src/UmbracoSearch.Analytics.Backoffice.Client
-npm run build
-```
-
-The build writes to `src/UmbracoSearch.Analytics/wwwroot/App_Plugins/IL.UmbracoSearch.Analytics/`.
-
-Run locally:
-
-```bash
-cd src/UmbracoSearch.Analytics.Backoffice.Client
-npm install
-npm run storybook
-```
-
-Build preview artifacts:
-
-```bash
-npm run build-storybook
-```
-
-The preview uses a Storybook-only fake-data provider. Runtime backoffice
-behavior remains unchanged: production continues to use authenticated Umbraco
-fetch flow and existing management endpoints.
+AI coding agents: use the [`umbraco-search-analytics` skill](https://github.com/ihorleleka/IL.UmbracoSearch/blob/main/skills/umbraco-search-analytics/SKILL.md).
