@@ -3,10 +3,10 @@
 ## Diagnose in this order
 
 1. The registered feature matches the intended engine (`SearchOptions.Lucene` or `Azure`, exactly one).
-2. Startup log: Azure settings and license errors (`License token is not valid`, missing `Azure.*`/`OpenAi.*`) fail the host before any search.
+2. Startup log: an invalid license (`License token is not valid`) fails Azure search resolution; missing `Azure.*`/`OpenAi.*` settings are logged as errors ("Azure search is misconfigured") and leave search returning no results; failed Azure initialization is logged ("could not be initialized at startup") and does not stop the site.
 3. `DefaultIndexName`, the request `IndexName` and `Indexes` all name existing Umbraco indexes exactly. A wrong name usually means a logged error and empty results.
-4. The content is published, actually indexed, and your converter is discovered (it carries a registration attribute; analyzer `ILUS0001` is clean).
-5. Field declaration versus usage: scalar vs collection helper, the generic type, and the facetable/sortable/raw/multi-language flags.
+4. The content is published, actually indexed, and your converter is discovered (it carries a registration attribute; analyzer `ILUS0001` is clean). A converter that "does nothing" may have a near-miss signature on a default member (`ValueTask AddMediaComputedFieldsAsync`, `List<string> RunForIndexes`, `int Order`); see `indexing.md`.
+5. Field declaration versus usage: scalar vs collection helper (`FilterFor` on a collection field compiles without an analyzer error; check by hand), the generic type, and the facetable/sortable/raw/multi-language flags. A result model that fetches too much may be missing `partial` on a `[SearchResultFieldProjection]` class.
 6. Language: the requested culture resolves to a configured language, and values exist for it (the default language reads the unsuffixed field).
 7. Lucene full-text returns nothing: no field is declared `isSearchable: true` and no `SearchFields` were supplied.
 8. Taxonomy results are empty: filtering tags where category paths were meant (or the reverse), or the expansion settings do not match what the UI expects.

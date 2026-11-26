@@ -32,7 +32,8 @@ public static class ProductFields
 - Flags (string/array/number as applicable): `isSearchable`, `isFacetable`, `isSortable`, `isFilterable`, `isRaw` (untokenized exact value), `isMultiLanguage` (one field per language).
 - A definition has an optional Lucene part and an optional Azure part. A Lucene-only definition never reaches the Azure schema, and an Azure-only one never reaches Lucene.
 - Field name, generic type, scalar/collection shape, raw/tokenized, sortable, facetable and language variance are part of the data contract. Changing any of them needs a reindex and a review of every query and result model that uses the field.
-- Built-in fields live in `IndexingConstants.ComputedIndexFields` (for example `NodeIdInt`, `NodeName`, `SearchTitle`, `SearchContent`, `SearchDate`, `Url`, `ItemType`, `TaxonomyTags`); reuse them rather than redeclaring.
+- Built-in fields live in `IndexingConstants.ComputedIndexFields` (for example `NodeIdInt`, `NodeName`, `SearchTitle`, `SearchContent`, `SearchDate`, `Url`, `ItemType`, `ExcludedFromSearch`, `TaxonomyTags`); reuse them rather than redeclaring. Mind their types: `SearchDate` is a `long` (store `DateTime.Ticks`), `ExcludedFromSearch` is a `bool`, `TaxonomyTags` is a `List<string>` (a collection field).
+- The package's own converters run first: the core converter at `Order` 0 populates the built-ins, and the Azure vector converter runs at `Order` 100. Your converters default to `Order` 1, so they run after the core one and can replace a built-in with `SetOrOverrideComputedValue`; give a converter a higher `Order` than another converter whose value it must replace.
 
 ## `IIndexingConverter`
 
@@ -59,6 +60,8 @@ public sealed class ProductIndexingConverter : IIndexingConverter
 ```
 
 `AddMediaComputedFieldsAsync` has a no-op default; override it only for media fields.
+
+> **Signature trap.** `AddMediaComputedFieldsAsync`, `Order` and `RunForIndexes` are default interface members, so the compiler does not require an override and does not complain about a near miss. `public async Task AddMediaComputedFieldsAsync(...)` (instead of `ValueTask`), `public IEnumerable<string> RunForIndexes()` (instead of `List<string>`) or `public long Order` compile, are never called, and the default runs instead. Copy the signature exactly and prove it: a one-line test that calls the method through `IIndexingConverter` and asserts a field was set catches it. Releases after 18.0.0.5 warn with `ILUS0006`.
 
 - `GetIndexFieldDefinitions()` is the schema contract: declare every field that queries, facets or results use.
 - `Order`: converters with the same `Order` run concurrently and must not write the same field; the next `Order` starts after the previous group finishes. A converter that throws is logged and skipped; the item is still indexed.
@@ -93,7 +96,10 @@ public sealed class ExternalProducts : IExternalIndexingConverter
 ```
 
 - Only fields registered for the target index are indexed (plus `Path`, `Published`, `UmbracoPath`, `UmbracoId`), so declare every value you set.
-- Same-`Order` external converters run concurrently; later groups wait. `RunForIndexes()` and `Order` behave as above.
+- Same-`Order` external converters run concurrently; later groups wait. `RunForIndexes()` (default: every index) and `Order` (default 1) behave as above.
+- To re-index external records outside a full Umbraco rebuild (for example after a feed import), inject `IExternalRebuildIndexingRunner` and call `RunForIndexAsync(indexName)` (or `RunForConfiguredIndexesAsync()`): it runs every external converter registered for that index and indexes the result through the same path as a rebuild, with the declared-field whitelist, language and vector handling. You do not need to resolve a converter yourself, register it twice with a key, or write to Examine directly; that bypasses the whitelist and the language context (and do not hard-code a culture in an `IndexingItemContext`).
+- The package has no API to delete external items. Records that disappear from the source stay indexed until you remove them through Examine (`IExamineManager`, `IIndex.DeleteFromIndex`); test the id you pass against a real search result.
+- The fields a converter-registered definition list covers include the built-ins, so an external model can set `Url`, `SearchDate`, `ItemType` or `ExcludedFromSearch` without redeclaring them. Any other field you set must be declared by a converter registered for the index.
 - With vector content set and embeddings enabled, vectors are generated during the rebuild; with background embeddings enabled they are queued instead (see `azure-and-vectors.md`).
 
 ## Azure scoring profiles (`IScoringProfileProvider`)

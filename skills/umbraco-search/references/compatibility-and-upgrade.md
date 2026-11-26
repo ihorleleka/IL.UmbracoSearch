@@ -1,6 +1,18 @@
 # Compatibility and upgrade
 
-Applies to `IL.UmbracoSearch` 17.8.0.1 and later, including the 18.0.x releases. One package line serves both Umbraco 17 and 18 through two target frameworks.
+Written against `IL.UmbracoSearch` 18.0.0.5, which serves both Umbraco 17 and 18 through two target frameworks. Earlier 17.8.x builds differ; check the installed version before relying on the sections below.
+
+## What differs by installed version
+
+Read the version from the application's `*.csproj`/`Directory.Packages.props` (or the restored `project.assets.json`), then use this table.
+
+| Installed | Target frameworks | Umbraco floor in package metadata | Pinned dependency minimums | Analyzers shipped |
+| --- | --- | --- | --- | --- |
+| 17.8.1.x - 17.8.5.x | `net10.0` only | `Umbraco.Cms.Web.Common [17.0.0, 18.0.0)` | exact versions, no upper bounds: `IL.AttributeBasedDI` 2.9.1.1 to 2.10.1.1, `Azure.Search.Documents` 12.1.0-beta.1, `Microsoft.ML.Tokenizers` 2.0.0, `ModelContextProtocol` 2.2.0 | registration (`ILUS0001`), filter shape (`ILUS0002`/`ILUS0003`) and the projection generator |
+| 18.0.0.x up to 18.0.0.5 | `net10.0` and `net11.0` | 17.8.1+ on .NET 10, 18.3.1+ on .NET 11 | the ranges listed below | the same, plus code fixes from 18.0.0.5 |
+| releases after 18.0.0.5 | as 18.0.0.5 | as 18.0.0.5 | as 18.0.0.5 | additionally `ILUS0004` (untyped `FilterFor` on a collection field), `ILUS0005` (projection on a non-partial class), `ILUS0006` (default-member signature mismatch), all warnings; `FacetFor`/`FacetOptionsFor` helpers |
+
+The package major (17 or 18) does not track the Umbraco major: 18.0.x runs on Umbraco 17.8.1+ with .NET 10. Verify any API named in the other references against the installed version if it is not in the 17.8 core behavior (async converters, `IndexFieldDefinitionFactory`).
 
 ## Pairing (choose by runtime)
 

@@ -51,7 +51,8 @@ Keep tokens and keys in secret storage.
 ## Rules that bite
 
 - The license is checked only with the Azure feature: an invalid or missing `LicenseToken` makes initialization throw `InvalidOperationException("License token is not valid.")`. Lucene needs no token.
-- With Azure, host startup fails when `Azure.ServiceUrl` or `Azure.ApiKey` is missing or the URL is not absolute. When `Azure.UseHybridSearch` is on, startup also fails without `OpenAi.ApiKey`, an absolute `OpenAi.ServiceUrl`, or `OpenAi.EmbeddingsDeploymentName`. Values the runtime clamps (batch sizes, chunk bounds, concurrency) are not validated.
+- The package never stops the host for search configuration: with Azure, a missing `Azure.ServiceUrl` or `Azure.ApiKey`, a non-absolute URL, or (with `Azure.UseHybridSearch`) missing `OpenAi.*` values are logged as an error at startup and searches then return no results. Only an invalid license token fails. Values the runtime clamps (batch sizes, chunk bounds, concurrency) are not checked.
+- Search outages degrade instead of blocking: failed searches return empty results (logged), deleting/unpublishing/trashing content never fails because the index could not be updated (logged; the entry stays until the next rebuild), and index discovery against an unreachable Azure service times out (10 s) and is retried at most every 15 s.
 - A misspelled or missing configured index can surface as a logged error and empty results instead of a startup failure; cover this in operational tests.
 - `ReadOnly`, the server role and the `Indexes` allow-list are hard safety constraints for Azure writes. Do not work around them.
 - Vary settings per environment with normal ASP.NET configuration layering, not code branches.

@@ -6,15 +6,17 @@ Choose Azure only when its operational needs exist: service credentials, a manag
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `Azure.ServiceUrl`, `Azure.ApiKey` | none | Required; startup fails without them or with a non-absolute URL. |
+| `Azure.ServiceUrl`, `Azure.ApiKey` | none | Required (absolute URL). Missing values do not stop the host: an error is logged at startup, searches return no results and indexing is skipped. |
 | `Azure.UseHybridSearch` | `false` | Keyword plus vector search. Needs `OpenAi.*`. |
 | `Azure.UseChunkedVectorSearch` | `false` | Also store chunk-level vectors (multi-vector field). |
 | `Azure.ChunkedVectorMinTokens` / `MaxTokens` / `OverlapTokens` | 2000 / 3000 / 200 | Chunk size policy. |
 | `Azure.ChunkedVectorEmbeddingMaxConcurrency` | 4 (clamped 1-16) | Concurrent embedding requests across the whole application. |
 | `Azure.BackgroundEmbeddingsProcessing` | `false` | Generate vectors in a durable background queue (below). |
 | `Azure.BackgroundEmbeddingsMaxConcurrency` | 4 | Vector jobs processed at once. |
+| `Azure.QueryEmbeddingTimeoutMilliseconds` | 5000 | Longest a hybrid search waits for the query embedding. On timeout or failure the search continues as keyword-only (logged warning). `0` or negative waits indefinitely. |
 | `Azure.DocumentBatchMaxActions` / `MaxPayloadBytes` / `FlushIntervalMilliseconds` | 100 / 14 MiB (14680064) / 250 | Bounds of each Azure write batch. |
 | `Azure.DocumentBatchQueueCapacity` | 2000 | Accepted-but-unsent writes; indexing waits when full. |
+| `Azure.DocumentBatchEnqueueTimeoutMilliseconds` | 30000 | Longest indexing waits for queue space (and a delete waits for queued writes to drain) while Azure is not draining. After that the document is dropped with an error log (a rebuild restores it) and a delete proceeds. `0` or negative waits forever. |
 | `Azure.DocumentBatchMaxRetries` | 3 | Retries for transient failures (408, 409, 429, 5xx). |
 | `OpenAi.ServiceUrl`, `ApiKey`, `EmbeddingsDeploymentName` | none | Embedding service; required when hybrid is on (for example deployment `text-embedding-3-large`). |
 
@@ -35,7 +37,7 @@ Enable only after ordinary search works.
 2. In an indexing converter, set the source text: `indexingObject.SetVectorContent(text)`.
 3. Search with `new FullTextSearch(query, useHybridSearch: true)`. Optional knobs: `VectorBasedResultsWeight`, `VectorSimilarityThreshold`, `CustomVector` (find items similar to an existing vector).
 
-Average vectors: content under 8,000 tokens is embedded in one request; larger content is chunked and the chunk embeddings are averaged. Unchanged content is not re-embedded (results are cached by a content hash). Hybrid requests drop score ordering because Azure rejects it together with vector queries.
+Average vectors: content under 8,000 tokens is embedded in one request; larger content is chunked and the chunk embeddings are averaged. Unchanged content is not re-embedded (results are cached by a content hash). Hybrid requests drop score ordering because Azure rejects it together with vector queries. If the query embedding fails or times out, the request still returns keyword results (without the vector half) and logs a warning.
 
 ## Chunk (granular) vectors
 
@@ -53,6 +55,6 @@ item.SetVectorContentPreciseManual(content, minTokens: 600, maxTokens: 900, over
 
 ## Background embeddings
 
-With `BackgroundEmbeddingsProcessing = true` (and hybrid on), indexing computes neither vector inline: it queues a durable job and the document is searchable before its vector fields exist. Results are therefore eventually consistent; a just-published item may not take part in vector matching yet. Failed jobs retry with backoff, then are dropped.
+With `BackgroundEmbeddingsProcessing = true` (and hybrid on), indexing computes neither vector inline: it queues a durable job and the document is searchable before its vector fields exist. Results are therefore eventually consistent; a just-published item may not take part in vector matching yet. Failed jobs retry with backoff, then are dropped. If queueing a job fails (embeddings database unavailable) the document is still indexed and uploaded without vectors, with an error logged, until the next rebuild.
 
-When `SearchSettings:EmbeddingsSqlPersistenceConnectionStringName` names a connection string, the embedding cache and job tables live in that database and pending embedding migrations are applied automatically at startup; without it an in-memory store is used (lost on restart, not shared between servers). Do not delete embedding data to fix a relevance issue.
+When `SearchSettings:EmbeddingsSqlPersistenceConnectionStringName` names a connection string, the embedding cache and job tables live in that database and pending embedding migrations are applied automatically at startup (the host waits at most 30 s for them, then continues while they finish in the background); without it an in-memory store is used (lost on restart, not shared between servers). Do not delete embedding data to fix a relevance issue.

@@ -42,7 +42,7 @@ Options bind from `SearchSettings:Analytics`; `UmbracoSearch:Analytics` is accep
 
 - SQL Server. Connection string resolution order: `SearchSettings:Analytics:ConnectionString`, then `ConnectionStrings:UmbracoSearchAnalytics`, then `ConnectionStrings:umbracoDbDSN`. With none, startup fails unless `UseInMemoryStorage` is `true`.
 - The package uses its own migrations-history table and does not touch Umbraco tables.
-- Pending migrations are applied automatically at startup on nodes where the feature is active and `EnableBackgroundProcessing` is `true`. Never hand-write migration files; generate schema changes with `dotnet ef`.
+- Pending migrations are applied automatically at startup on nodes where the feature is active and `EnableBackgroundProcessing` is `true`. The host waits at most 30 s for them; after that startup continues and the migration finishes in the background (a warning is logged; captures flushed before the tables exist are discarded and logged). Never hand-write migration files; generate schema changes with `dotnet ef`.
 - The legacy `DailyAggregates` table is no longer populated or read by reports; permanent data deletion still clears it.
 - Replaceable seams (registered in DI): `IAnalyticsSanitizer`, `IAnalyticsConsentProvider`, `IAnalyticsStore`, `IAnalyticsCaptureQueue`, `IAnalyticsClock`. Custom implementations must not store IP addresses or user names. The default sanitizer redacts emails and long numbers and normalizes and lower-cases query text.
 

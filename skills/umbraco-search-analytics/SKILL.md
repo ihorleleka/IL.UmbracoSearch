@@ -9,7 +9,7 @@ Optional Search Insights for `IL.UmbracoSearch`: it decorates `ISearchService` t
 
 ## Non-negotiable contracts
 
-- Enable `SearchOptions.Analytics` together with **exactly one** engine (`Lucene` or `Azure`). Any other combination throws `InvalidOperationException` at startup and on every search.
+- Enable `SearchOptions.Analytics` together with **exactly one** engine (`Lucene` or `Azure`). Any other combination is logged as an error at startup and analytics capture is bypassed (search itself keeps working, `SearchResults.Analytics` stays `null`).
 - Capture is per request and opt-in: it happens only when `SearchParameters.Analytics` (or `SuggestionsSearchRequest.Analytics`) is supplied with `CaptureAnalytics = true`. Otherwise `SearchResults.Analytics` is `null`. Set `CaptureAnalytics = false` on server-generated, internal or replayed searches.
 - Every captured search gets its own `TrackingReference`; use it for click tracking. Keep the returned `AnalyticsSessionToken` in the caller and send it back on later searches to group them into one session. `SiteKey` (a GUID) partitions data by website.
 - Impressions and clicks use Umbraco content **GUID node keys** only, never numeric ids.

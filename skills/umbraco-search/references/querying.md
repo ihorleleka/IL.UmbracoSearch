@@ -22,7 +22,7 @@ Inject `ISearchService`; `SearchAsync<T>(SearchParameters)` returns `SearchResul
 
 ## Full-text
 
-`new FullTextSearch(query, searchFields, useWildcardSearch: true, useHybridSearch: false, boostExactPhrase: false)`; `SearchMode` defaults to `All` (every term required).
+`new FullTextSearch(query, searchFields, useWildcardSearch: true, useHybridSearch: false, boostExactPhrase: false)`. Every option is also a settable property (`new FullTextSearch(query) { UseHybridSearch = true, SearchMode = SearchMode.Any }`). `SearchMode` is the Azure SDK enum `Azure.Search.Documents.Models.SearchMode` on both engines and defaults to `All` (every term required); use `Any` for natural-language input.
 
 - A complete `"quoted"` section is one required word group, not an exact phrase. With explicit `SearchFields`, every word of the group is bound to its field.
 - Standalone `AND`, `OR`, `NOT` are treated as search terms; special characters are escaped.
@@ -48,14 +48,27 @@ Filters =
 
 - One leaf targets one field; combine fields with `And`, `Or`, `Not`. Pass a `FilteringBehavior` (`And`, `Or`, `Not`) before the values to control how multiple values combine (collection leaves default to `Or`).
 - `FilterFor(IIndexFieldDefinition, params string[])` is the fallback when a field is only known at runtime.
-- `FilterFor` on a collection field is analyzer `ILUS0002`; `FilterForCollectionField` on a scalar field is `ILUS0003`.
+- `FilterFor` on a collection field is analyzer `ILUS0002` and `FilterForCollectionField` on a scalar field is `ILUS0003` (build errors). They only fire when the typed overload is chosen: `FilterFor(field, "text")` with an `IndexFieldDefinition<string[]>` (or `List<string>`, `HashSet<string>`, the built-in `TaxonomyTags`) binds to the untyped `FilterFor(IIndexFieldDefinition, params string[])` overload and compiles without an error. Releases after 18.0.0.5 warn with `ILUS0004`; always use `FilterForCollectionField` for collection fields.
 - Keep the field's real type; filtering numbers or dates as strings is engine-specific and fragile. Lucene string filters are case-sensitive on stored values.
 
 ## Ordering, facets, boosts
 
 - `ISearchOrdering.ByScore(OrderingType.Descending)` and `ISearchOrdering.ByField(field, OrderingType...)`; a sort field must be declared sortable. Azure drops score ordering for hybrid requests.
-- `FacetOn = [new FacetOn(ProductFields.Tags, amountOfTopFacetsToTake: 20)]` returns `Facet`s keyed by the requested logical field name on both engines, including multi-language fields. A request with `Skip 0`, `Take 0` and facets returns totals and facets without items.
-- Use `ExtraBoostingOptions` only for explicit relevance policy and check it on the chosen engine.
+- `FacetOn = [new FacetOn(ProductFields.Tags, amountOfTopFacetsToTake: 20)]` returns `Facet`s keyed by the requested logical field name on both engines, including multi-language fields. A request with `Skip 0`, `Take 0` and facets returns totals and facets without items (covered by the package tests; very old builds may need `Take 1`, so confirm on the installed version before copying a `Take = 1` workaround). A string, `string[]`, `List<string>` or `HashSet<string>` field converts to `FacetOn` implicitly.
+
+### Reading facets
+
+`SearchResults<T>.Facets` is a `List<Facet>` (null when nothing was requested). Without taxonomy expansion each facet is one requested field:
+
+| Member | Meaning |
+| --- | --- |
+| `Facet.IndexFieldName` | the logical field the facet was computed on (the name of the field you passed to `FacetOn`) |
+| `Facet.Values` | `FacetOption`s: `Value` (the stored value to filter by), `HitsCount`, optional `Label` |
+| `Facet.Label`, `Facet.Value`, `Facet.HitsCount` | set for taxonomy hierarchy nodes; otherwise usually empty |
+| `Facet.ChildFacetsIndexFieldName`, `FacetOption.ChildFacets` / `ChildFacetsIndexFieldName` | next level of a taxonomy hierarchy and the field to filter that level by |
+
+Find a facet by field instead of repeating string comparisons: `results.Facets.FacetFor(ProductFields.Tags)` and `results.Facets.FacetOptionsFor(ProductFields.Tags)` (releases after 18.0.0.5; earlier, `Facets?.FirstOrDefault(f => f.IndexFieldName == field.FieldName)`). Facet counts are computed over the whole filtered result set, including the filters the user just selected, so a "show all options" UI must run a second facet-only query without that filter. Reuse the same field definition objects for `FacetOn`, filters and lookups; do not hand-build field names.
+- Use `ExtraBoostingOptions` only for explicit relevance policy and check it on the chosen engine. On Azure, a request with `ExtraBoostingOptions` forces `SearchMode.Any` whatever `FullTextSearch.SearchMode` says; if you need `All` with a relevance bias, use a scoring profile instead (`indexing.md`).
 
 ## Suggestions
 
@@ -89,8 +102,12 @@ public partial class ProductSearchResult : SearchResultModelBase
 }
 ```
 
-- `[SearchResultFieldProjection]` on a `partial` model makes the bundled generator emit `RequiredIndexFields` from the fields used in `ValueFor`/`ValueForAs` and in methods marked `[SearchResultFieldAccessor]`; the engine then fetches only those fields. Do not declare `ISearchResultFieldProjection` or `RequiredIndexFields` yourself. Unmarked models keep all-fields retrieval.
+- `[SearchResultFieldProjection]` on a model that is not `partial` is silently ignored (the model keeps all-fields retrieval; releases after 18.0.0.5 warn with `ILUS0005`). On a `partial` model the bundled generator emits `RequiredIndexFields` from the fields used in `ValueFor`/`ValueForAs` and in methods marked `[SearchResultFieldAccessor]`; the engine then fetches only those fields. Do not declare `ISearchResultFieldProjection` or `RequiredIndexFields` yourself. Unmarked models keep all-fields retrieval.
 - Projection is direct-only: an unmarked derived model does not inherit its base's projection. Each reusable base must itself be `partial` and marked.
 - `CommonSearchResultProjection` is the projected common base; `CommonSearchItemModel` is the ordinary unprojected one. Across assemblies a model composes `RequiredIndexFields` from its nearest marked base; mark intermediate bases whose fields must flow further.
 - Every projected field must be registered by an indexing converter and stored by the engine's schema.
 - Both engines always add the node key to what they fetch, so analytics works for projected models.
+
+## Decorating `ISearchService`
+
+Wrapping the search service is supported and is the place for behavior that must apply to every search (relabelling or dropping facets, default parameters, logging). Register the decorator with `[Decorator<SearchOptions>(Feature = SearchOptions.Lucene | SearchOptions.Azure)]` and implement both `SearchAsync<T>` and `SuggestAsync<T>` (forward the one you do not change). Several decorators are ordered with `DecorationOrder`; give them distinct values and cover the wrapping order with a test. Prefer a decorator or a small application service over copying the same post-processing into every page converter, and keep it cheap: it runs on every request.
