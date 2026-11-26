@@ -8,9 +8,9 @@ Read the version from the application's `*.csproj`/`Directory.Packages.props` (o
 
 | Installed | Target frameworks | Umbraco floor in package metadata | Pinned dependency minimums | Analyzers shipped |
 | --- | --- | --- | --- | --- |
-| 17.8.1.x - 17.8.5.x | `net10.0` only | `Umbraco.Cms.Web.Common [17.0.0, 18.0.0)` | exact versions, no upper bounds: `IL.AttributeBasedDI` 2.9.1.1 to 2.10.1.1, `Azure.Search.Documents` 12.1.0-beta.1, `Microsoft.ML.Tokenizers` 2.0.0, `ModelContextProtocol` 2.2.0 | registration (`ILUS0001`), filter shape (`ILUS0002`/`ILUS0003`) and the projection generator |
+| 17.8.1.x - 17.8.5.x | `net10.0` only | `Umbraco.Cms.Web.Common [17.0.0, 18.0.0)` | exact versions, no upper bounds: `IL.AttributeBasedDI` 2.9.1.1 to 2.10.1.1, `Azure.Search.Documents` 12.1.0-beta.1, `Microsoft.ML.Tokenizers` 2.0.0, `ModelContextProtocol` 2.2.0 | registration (`ILUS0001`), filter shape (`ILUS0002` and `ILUS0003`, the latter reporting `FilterForCollectionField` on a scalar field) and the projection generator |
 | 18.0.0.x up to 18.0.0.5 | `net10.0` and `net11.0` | 17.8.1+ on .NET 10, 18.3.1+ on .NET 11 | the ranges listed below | the same, plus code fixes from 18.0.0.5 |
-| releases after 18.0.0.5 | as 18.0.0.5 | as 18.0.0.5 | as 18.0.0.5 | additionally `ILUS0004` (untyped `FilterFor` on a collection field), `ILUS0005` (projection on a non-partial class), `ILUS0006` (default-member signature mismatch), all warnings; `FacetFor`/`FacetOptionsFor` helpers |
+| releases after 18.0.0.5 | as 18.0.0.5 | as 18.0.0.5 | as 18.0.0.5 | additionally `ILUS0004` (untyped `FilterFor` on a collection field), `ILUS0005` (projection on a non-partial class), `ILUS0006` (default-member signature mismatch), all warnings (`ILUS0006` also covers abstract converter base classes); `ILUS0003` is removed (the compiler already rejects that call) and `ILUS0002` no longer flags dictionary-typed fields; `FacetFor`/`FacetOptionsFor` helpers |
 
 The package major (17 or 18) does not track the Umbraco major: 18.0.x runs on Umbraco 17.8.1+ with .NET 10. Verify any API named in the other references against the installed version if it is not in the 17.8 core behavior (async converters, `IndexFieldDefinitionFactory`).
 

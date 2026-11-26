@@ -27,7 +27,7 @@ These mistakes build and run. Package versions after 18.0.0.5 warn about them (a
 
 - `AddMediaComputedFieldsAsync`, `Order` and `RunForIndexes` have default implementations, so a member with the right name and a wrong signature (`async Task AddMediaComputedFieldsAsync`, `IEnumerable<string> RunForIndexes()`, `long Order`) compiles and is silently never called. Copy the interface signature exactly: `ValueTask AddMediaComputedFieldsAsync(IPublishedContent? publishedContent, IndexingModel indexingObject, IndexingItemContext context, CancellationToken cancellationToken = default)`.
 - `[SearchResultFieldProjection]` on a class that is not `partial` is ignored without any message and the model keeps fetching every field.
-- `ISearchFilter.FilterFor(collectionField, "value")` binds to the untyped `FilterFor(IIndexFieldDefinition, params string[])` overload, so analyzer `ILUS0002` cannot see it (`ILUS0004` warns in newer packages). It currently works, but use `FilterForCollectionField`.
+- `ISearchFilter.FilterFor(collectionField, "value")` binds to the untyped `FilterFor(IIndexFieldDefinition, params string[])` overload, so analyzer `ILUS0002` cannot see it (`ILUS0004` warns in newer packages). It currently works, but use `FilterForCollectionField`, which is type-checked (the compiler already rejects it on a scalar field; a dictionary-typed field is not a collection field and uses `FilterFor`). Analyzer `ILUS0003` from older packages no longer exists after 18.0.0.5.
 - Same-`Order` converters run concurrently: two of them writing one field race, and the winner is not deterministic.
 
 ## Decision guide
